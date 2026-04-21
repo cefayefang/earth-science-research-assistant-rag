@@ -1,0 +1,493 @@
+{
+  "evaluation_set_name": "earth_science_rag_eval_from_uploaded_papers_v1",
+  "created_from": [
+    "drought_012_xu_2023.pdf",
+    "drought_010_xu_2018.pdf",
+    "drought_008_wang_2021.pdf",
+    "drought_009_dong_2019.pdf",
+    "drought_006_thi_2023.pdf",
+    "stac_metadata.json",
+    "nasa_cmr_earthdata_metadata.json"
+  ],
+  "notes": [
+    "Built only from files uploaded in this conversation.",
+    "Gold outputs are reference answers for recommendation-style evaluation; model outputs do not need to match wording exactly.",
+    "Dataset IDs are included only when a matching uploaded metadata record could be identified confidently."
+  ],
+  "samples": [
+    {
+      "sample_id": "eval_ca_xu_2023",
+      "answer_mode": "recommendation",
+      "source_paper": {
+        "local_id": "drought_012_xu_2023.pdf",
+        "title": "Evaluating the cumulative and time-lag effects of vegetation response to drought in Central Asia under changing environments",
+        "year": 2023
+      },
+      "research_question": "What datasets and reference paper would be a good starting point for studying cumulative and time-lagged vegetation responses to meteorological drought in Central Asia from the satellite era onward?",
+      "gold_output": {
+        "answer": "A strong starting point is to pair MODIS vegetation indices with a multiscale drought index and supporting hydroclimate variables for Central Asia. The paper itself is a direct methodological reference.",
+        "recommended_datasets": [
+          {
+            "dataset_id": "modis-13A1-061",
+            "dataset_name": "MODIS Vegetation Indices 16-Day (500m) / MOD13A1",
+            "reason": "Used to derive NDVI and EVI for vegetation greenness, and its NIR band was used to derive NIRv."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "GOSIF",
+            "reason": "Used as a monthly solar-induced chlorophyll fluorescence proxy for photosynthetic activity in Central Asia from 2001 to 2020."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "SPEIbase V2.7",
+            "reason": "Used to characterize meteorological drought at 1- to 12-month time scales."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "ERA5-Land",
+            "reason": "Used to derive soil moisture and vapor pressure deficit as key hydroclimatic drivers."
+          }
+        ],
+        "recommended_papers": [
+          {
+            "openalex_id": null,
+            "local_id": "drought_012_xu_2023.pdf",
+            "title": "Evaluating the cumulative and time-lag effects of vegetation response to drought in Central Asia under changing environments",
+            "reason": "Direct methodological reference for cumulative and lagged drought effects, drought thresholds, and driver analysis in Central Asia."
+          }
+        ],
+        "methodology_hints": [
+          "Compare vegetation indicators against SPEI across multiple accumulation windows rather than a single drought timescale.",
+          "Separate cumulative effects from lagged effects and evaluate both during the growing season.",
+          "Use an explicit thresholding method for vegetation loss and analyze additional drivers such as soil moisture and VPD."
+        ],
+        "uncertainty_notes": [
+          "GOSIF, SPEIbase V2.7, and ERA5-Land are named in the paper, but no matching uploaded metadata record was identified for them."
+        ]
+      },
+      "scoring_targets": {
+        "required_datasets": [
+          "MODIS Vegetation Indices 16-Day (500m) / MOD13A1",
+          "GOSIF",
+          "SPEIbase V2.7"
+        ],
+        "acceptable_datasets": [
+          "ERA5-Land"
+        ],
+        "required_papers": [
+          "drought_012_xu_2023.pdf"
+        ],
+        "required_reason_points": [
+          "vegetation greenness",
+          "photosynthesis or SIF",
+          "multiscale drought",
+          "Central Asia"
+        ],
+        "required_methodology_points": [
+          "cumulative vs lagged effects",
+          "1-12 month drought scale",
+          "soil moisture or VPD drivers"
+        ],
+        "match_policy": "family_match_allowed_for_MODIS_VI"
+      },
+      "evidence": [
+        {
+          "type": "paper_usage",
+          "source": "drought_012_xu_2023.pdf",
+          "note": "The study evaluated 2001-2020 vegetation response in Central Asia using NDVI, EVI, NIRv, SIF, and SPEI."
+        },
+        {
+          "type": "paper_usage",
+          "source": "drought_012_xu_2023.pdf",
+          "note": "NDVI and EVI came from MOD13A1; SIF came from GOSIF; SPEI came from SPEIbase V2.7; soil moisture and VPD were derived from ERA5-Land."
+        },
+        {
+          "type": "metadata_match",
+          "source": "stac_metadata.json",
+          "note": "Uploaded metadata contains modis-13A1-061 for MODIS vegetation indices."
+        }
+      ]
+    },
+    {
+      "sample_id": "eval_north_china_xu_2018",
+      "answer_mode": "recommendation",
+      "source_paper": {
+        "local_id": "drought_010_xu_2018.pdf",
+        "title": "Diverse responses of vegetation growth to meteorological drought across climate zones and land biomes in northern China from 1981 to 2014",
+        "year": 2018
+      },
+      "research_question": "Which datasets and reference paper should I use to analyze how vegetation in northern China responds to meteorological drought across climate zones and biomes over 1981-2014?",
+      "gold_output": {
+        "answer": "A suitable setup combines a long NDVI record with gridded climate inputs to compute SPEI, plus land cover and topographic information to compare biome and climate-zone differences.",
+        "recommended_datasets": [
+          {
+            "dataset_id": null,
+            "dataset_name": "GIMMS NDVI3g",
+            "reason": "Primary long-term vegetation record used from 1981 to 2014 at 8 km resolution."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "China meteorological station temperature and precipitation data",
+            "reason": "Used to compute SPEI across 1-48 month time scales."
+          },
+          {
+            "dataset_id": "modis-11A2-061",
+            "dataset_name": "MODIS Land Surface Temperature / MOD11A2 or MOD11C3 family",
+            "reason": "Used to evaluate interpolated climate layers and support climate characterization."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "TRMM 3B43 precipitation",
+            "reason": "Used to validate interpolated precipitation layers."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "SRTM DEM",
+            "reason": "Provided topographic information for spatial climate interpolation."
+          }
+        ],
+        "recommended_papers": [
+          {
+            "openalex_id": null,
+            "local_id": "drought_010_xu_2018.pdf",
+            "title": "Diverse responses of vegetation growth to meteorological drought across climate zones and land biomes in northern China from 1981 to 2014",
+            "reason": "Direct empirical reference for NDVI-SPEI relationships, drought timescales, and biome contrasts in northern China."
+          }
+        ],
+        "methodology_hints": [
+          "Use a long NDVI time series and compute SPEI over multiple accumulation windows rather than a single drought index timescale.",
+          "Correlate NDVI with SPEI by biome and climate zone to identify drought-sensitive ecosystem types.",
+          "Keep land cover and topography in the pipeline to interpret spatial heterogeneity."
+        ],
+        "uncertainty_notes": [
+          "The primary NDVI and climate inputs named in the paper do not all have matching uploaded metadata records."
+        ]
+      },
+      "scoring_targets": {
+        "required_datasets": [
+          "GIMMS NDVI3g",
+          "China meteorological station temperature and precipitation data"
+        ],
+        "acceptable_datasets": [
+          "MODIS Land Surface Temperature / MOD11A2 or MOD11C3 family",
+          "TRMM 3B43 precipitation",
+          "SRTM DEM"
+        ],
+        "required_papers": [
+          "drought_010_xu_2018.pdf"
+        ],
+        "required_reason_points": [
+          "long-term NDVI",
+          "SPEI",
+          "climate zones",
+          "biomes or land cover"
+        ],
+        "required_methodology_points": [
+          "multi-timescale drought",
+          "NDVI-SPEI correlation",
+          "biome comparison"
+        ],
+        "match_policy": "strict_for_core_inputs"
+      },
+      "evidence": [
+        {
+          "type": "paper_usage",
+          "source": "drought_010_xu_2018.pdf",
+          "note": "The paper analyzed northern China from 1981 to 2014 using GIMMS NDVI3g and SPEI."
+        },
+        {
+          "type": "paper_usage",
+          "source": "drought_010_xu_2018.pdf",
+          "note": "Monthly temperature and precipitation from 350 stations were used to compute SPEI; MODIS LST, TRMM, SRTM, and MODIS land cover supported validation and interpretation."
+        },
+        {
+          "type": "metadata_match",
+          "source": "stac_metadata.json",
+          "note": "Uploaded metadata contains modis-11A2-061 for MODIS land surface temperature."
+        }
+      ]
+    },
+    {
+      "sample_id": "eval_tibetan_plateau_wang_2021",
+      "answer_mode": "recommendation",
+      "source_paper": {
+        "local_id": "drought_008_wang_2021.pdf",
+        "title": "Response of vegetation to drought in the Tibetan Plateau: Elevation differentiation and the dominant factors",
+        "year": 2021
+      },
+      "research_question": "What datasets and reference paper would you recommend for studying how vegetation on the Tibetan Plateau responds to drought across elevation gradients?",
+      "gold_output": {
+        "answer": "A strong design uses multiple vegetation products together with multiscale drought indicators and elevation-related control variables so that drought responses can be compared across altitude bands.",
+        "recommended_datasets": [
+          {
+            "dataset_id": "modis-13A1-061",
+            "dataset_name": "MODIS Vegetation Indices 16-Day (500m) / MOD13A1",
+            "reason": "Used for EVI, one of the core vegetation indicators."
+          },
+          {
+            "dataset_id": "modis-15A2H-061",
+            "dataset_name": "MODIS Leaf Area Index / MOD15A2H",
+            "reason": "Used for LAI as a canopy-structure indicator."
+          },
+          {
+            "dataset_id": "modis-17A2H-061",
+            "dataset_name": "MODIS Gross Primary Productivity / MOD17A2H",
+            "reason": "Used for GPP as a productivity indicator."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "China Meteorological Forcing Dataset",
+            "reason": "Used to compute SPI and SPEI over the Tibetan Plateau."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "Soil moisture dataset of China based on microwave data assimilation",
+            "reason": "Used as a control factor for vegetation response to drought."
+          }
+        ],
+        "recommended_papers": [
+          {
+            "openalex_id": null,
+            "local_id": "drought_008_wang_2021.pdf",
+            "title": "Response of vegetation to drought in the Tibetan Plateau: Elevation differentiation and the dominant factors",
+            "reason": "Direct reference for elevation-dependent drought response and dominant-factor analysis."
+          }
+        ],
+        "methodology_hints": [
+          "Use more than one vegetation indicator so drought response is not inferred from a single proxy.",
+          "Compute SPI and SPEI and compare drought-response metrics across elevation intervals.",
+          "Add control factors such as LST, soil moisture, snow cover, and land cover when interpreting spatial heterogeneity."
+        ],
+        "uncertainty_notes": [
+          "Only the MODIS products listed above were matched to uploaded metadata; the forcing and soil-moisture datasets were identified only from the paper text."
+        ]
+      },
+      "scoring_targets": {
+        "required_datasets": [
+          "MODIS Vegetation Indices 16-Day (500m) / MOD13A1",
+          "MODIS Leaf Area Index / MOD15A2H",
+          "MODIS Gross Primary Productivity / MOD17A2H",
+          "China Meteorological Forcing Dataset"
+        ],
+        "acceptable_datasets": [
+          "Soil moisture dataset of China based on microwave data assimilation",
+          "MODIS PET / MOD16A2",
+          "MODIS Land Surface Temperature / MOD11A2"
+        ],
+        "required_papers": [
+          "drought_008_wang_2021.pdf"
+        ],
+        "required_reason_points": [
+          "Tibetan Plateau",
+          "elevation",
+          "multiple vegetation indicators",
+          "SPI or SPEI"
+        ],
+        "required_methodology_points": [
+          "elevation intervals",
+          "control factors",
+          "drought index comparison"
+        ],
+        "match_policy": "strict_for_core_MODIS_products"
+      },
+      "evidence": [
+        {
+          "type": "paper_usage",
+          "source": "drought_008_wang_2021.pdf",
+          "note": "The study used EVI, LAI, and GPP from MODIS plus SPI and SPEI to assess drought response on the Tibetan Plateau from 2000 to 2015."
+        },
+        {
+          "type": "paper_usage",
+          "source": "drought_008_wang_2021.pdf",
+          "note": "It also used China Meteorological Forcing data, microwave-assimilation soil moisture, elevation, LST, snow cover, and land cover as control variables."
+        },
+        {
+          "type": "metadata_match",
+          "source": "stac_metadata.json",
+          "note": "Uploaded metadata contains modis-13A1-061, modis-15A2H-061, and modis-17A2H-061."
+        }
+      ]
+    },
+    {
+      "sample_id": "eval_california_dong_2019",
+      "answer_mode": "recommendation",
+      "source_paper": {
+        "local_id": "drought_009_dong_2019.pdf",
+        "title": "Vegetation Responses to 2012-2016 Drought in Northern and Southern California",
+        "year": 2019
+      },
+      "research_question": "What datasets and reference paper should I use to examine how vegetation in Northern versus Southern California responded to the 2012-2016 drought?",
+      "gold_output": {
+        "answer": "A suitable setup uses a consistent NDVI series for California together with a drought-severity index and supporting regional climate information to compare NorCal and SoCal responses.",
+        "recommended_datasets": [
+          {
+            "dataset_id": "modis-43A4-061",
+            "dataset_name": "MODIS Nadir BRDF-Adjusted Reflectance / MCD43A4",
+            "reason": "Used to derive monthly NDVI for California from 2000 to 2018."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "monthly 4-km PDSIsc dataset",
+            "reason": "Used as the main climatological drought-severity index."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "PRISM temperature data",
+            "reason": "Used to derive temperature anomalies for California."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "USGS GAP vegetation database",
+            "reason": "Used to overlay ecological systems and vegetation zones."
+          }
+        ],
+        "recommended_papers": [
+          {
+            "openalex_id": null,
+            "local_id": "drought_009_dong_2019.pdf",
+            "title": "Vegetation Responses to 2012-2016 Drought in Northern and Southern California",
+            "reason": "Direct empirical reference for contrasting NorCal and SoCal vegetation responses during the recent California drought."
+          }
+        ],
+        "methodology_hints": [
+          "Derive monthly NDVI consistently over the study region and compare anomalies against a non-drought baseline.",
+          "Pair NDVI with a drought severity index such as PDSIsc to compare vegetation sensitivity by region or vegetation zone.",
+          "Separate Northern and Southern California because hydroclimatic forcing differs strongly between them."
+        ],
+        "uncertainty_notes": [
+          "The uploaded metadata clearly covers MCD43A4 but not the PDSIsc, PRISM, or USGS GAP inputs named in the paper."
+        ]
+      },
+      "scoring_targets": {
+        "required_datasets": [
+          "MODIS Nadir BRDF-Adjusted Reflectance / MCD43A4",
+          "monthly 4-km PDSIsc dataset"
+        ],
+        "acceptable_datasets": [
+          "PRISM temperature data",
+          "USGS GAP vegetation database"
+        ],
+        "required_papers": [
+          "drought_009_dong_2019.pdf"
+        ],
+        "required_reason_points": [
+          "California",
+          "NorCal vs SoCal",
+          "NDVI",
+          "drought severity"
+        ],
+        "required_methodology_points": [
+          "baseline anomaly",
+          "regional comparison",
+          "vegetation zones"
+        ],
+        "match_policy": "strict_for_primary_datasets"
+      },
+      "evidence": [
+        {
+          "type": "paper_usage",
+          "source": "drought_009_dong_2019.pdf",
+          "note": "The paper derived monthly NDVI from MCD43A4 and paired it with PDSIsc and PRISM temperature data to study 2012-2016 drought impacts."
+        },
+        {
+          "type": "paper_usage",
+          "source": "drought_009_dong_2019.pdf",
+          "note": "USGS GAP vegetation overlays were used to interpret patterns across California vegetation communities."
+        },
+        {
+          "type": "metadata_match",
+          "source": "stac_metadata.json",
+          "note": "Uploaded metadata contains modis-43A4-061."
+        }
+      ]
+    },
+    {
+      "sample_id": "eval_nw_africa_thi_2023",
+      "answer_mode": "recommendation",
+      "source_paper": {
+        "local_id": "drought_006_thi_2023.pdf",
+        "title": "Spatiotemporal characterization of droughts and vegetation response in Northwest Africa from 1981 to 2020",
+        "year": 2023
+      },
+      "research_question": "Which datasets and reference paper should I start with to study drought characteristics and vegetation response in Northwest Africa from 1981 to 2020?",
+      "gold_output": {
+        "answer": "A good starting point is to pair a long precipitation product with a long NDVI record, then compute an SPI timescale appropriate for seasonal vegetation response and add land cover and soil moisture for interpretation.",
+        "recommended_datasets": [
+          {
+            "dataset_id": null,
+            "dataset_name": "CHIRPS precipitation",
+            "reason": "Used to calculate SPI-3 and characterize drought conditions from 1981 to 2020."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "AVHRR NDVI version 5",
+            "reason": "Used as the vegetation health proxy across the full 1981-2020 period."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "FLDAS soil moisture",
+            "reason": "Used to support interpretation of vegetation and drought dynamics."
+          },
+          {
+            "dataset_id": null,
+            "dataset_name": "MODIS land cover product (2019)",
+            "reason": "Used to classify land cover types in the study region."
+          }
+        ],
+        "recommended_papers": [
+          {
+            "openalex_id": null,
+            "local_id": "drought_006_thi_2023.pdf",
+            "title": "Spatiotemporal characterization of droughts and vegetation response in Northwest Africa from 1981 to 2020",
+            "reason": "Direct empirical reference for CHIRPS-SPI and AVHRR-NDVI analysis in Northwest Africa."
+          }
+        ],
+        "methodology_hints": [
+          "Use a precipitation-driven drought index aligned to the agricultural or vegetation timescale of interest.",
+          "Convert the AVHRR NDVI series to monthly composites before correlating it with drought conditions.",
+          "Stratify analysis by land cover because crops and grasslands can respond differently."
+        ],
+        "uncertainty_notes": [
+          "The datasets named in this paper were identified from the PDF, but matching uploaded metadata records were not found for CHIRPS, AVHRR NDVI, or FLDAS."
+        ]
+      },
+      "scoring_targets": {
+        "required_datasets": [
+          "CHIRPS precipitation",
+          "AVHRR NDVI version 5"
+        ],
+        "acceptable_datasets": [
+          "FLDAS soil moisture",
+          "MODIS land cover product (2019)"
+        ],
+        "required_papers": [
+          "drought_006_thi_2023.pdf"
+        ],
+        "required_reason_points": [
+          "Northwest Africa",
+          "1981-2020",
+          "SPI-3",
+          "NDVI"
+        ],
+        "required_methodology_points": [
+          "monthly compositing",
+          "SPI timescale",
+          "land-cover differences"
+        ],
+        "match_policy": "strict_for_primary_datasets"
+      },
+      "evidence": [
+        {
+          "type": "paper_usage",
+          "source": "drought_006_thi_2023.pdf",
+          "note": "The study used CHIRPS to compute SPI-3 and AVHRR NDVI v5 to assess vegetation response from 1981 to 2020."
+        },
+        {
+          "type": "paper_usage",
+          "source": "drought_006_thi_2023.pdf",
+          "note": "MODIS land cover and FLDAS soil moisture were additional supporting datasets."
+        }
+      ]
+    }
+  ]
+}

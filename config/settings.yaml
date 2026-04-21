@@ -1,0 +1,88 @@
+project:
+  name: research_assistant
+  environment: dev
+
+paths:
+  root_dir: .
+  local_database_dir: local_database
+  dataset_metadata_dir: local_database/dataset_metadata
+  dataset_metadata_files:
+    - nasa_cmr_expanded_metadata.json
+    - stac_metadata.json
+    - copernicus_cds_metadata.json
+    - CDSE_collections.json
+  fulltext_paper_dir: local_database/fulltext_paper
+  id_track_file: local_database/fulltext_paper/id_track.xlsx
+  generated_dir: generated
+  parsed_papers_dir: generated/parsed_papers
+  debug_dir: generated/debug
+  chroma_dir: generated/chroma
+  normalized_datasets_path: generated/normalized_datasets.jsonl
+  paper_registry_path: generated/paper_registry.jsonl
+  chunks_path: generated/chunks.jsonl
+  dataset_aliases_path: local_database/dataset_metadata/dataset_aliases.json
+
+llm:
+  provider: google_ai_studio
+  default_model: gemini-2.5-flash
+  temperature: 0.1
+  max_output_tokens: 1024
+
+embeddings:
+  provider: sentence_transformers
+  model_name: BAAI/bge-small-en-v1.5
+  batch_size: 64
+
+pdf_processing:
+  primary_extractor: pymupdf
+  fallback_extractor: pdfplumber
+  use_ocr: false
+  detect_headings: true
+  reconstruct_paragraphs: true
+  remove_headers_footers: true
+  remove_page_numbers: true
+  chunk_strategy: heading_paragraph_first
+  chunk_size_tokens: 1000
+  chunk_overlap_tokens: 150
+
+openalex:
+  base_url: https://api.openalex.org
+  email: fayefang@g.harvard.edu
+  recent_top_k: 20
+  impactful_top_k: 20
+  timeout_seconds: 30
+
+zenodo:
+  base_url: https://zenodo.org/api
+  top_k: 10
+  timeout_seconds: 20
+  type: dataset
+  access_right: open
+
+retrieval:
+  dataset_top_k: 15
+  chunk_top_k: 20
+
+reranking:
+  paper_weights:
+    semantic_similarity: 0.35
+    chunk_relevance: 0.25
+    recency_score: 0.15
+    impact_score: 0.15
+    fulltext_bonus: 0.10
+  dataset_weights:
+    semantic_similarity: 0.35
+    variable_match: 0.20
+    literature_support: 0.20
+    spatial_match: 0.15
+    temporal_match: 0.10
+  literature_support_scores:
+    zenodo_doi_matches_openalex: 1.0
+    chunk_explicit_mention: 0.8
+    abstract_mention: 0.5
+    semantic_only: 0.2
+  spatial_temporal_default: 0.5
+
+logging:
+  save_debug_files: true
+  level: INFO

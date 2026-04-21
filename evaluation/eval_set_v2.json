@@ -1,0 +1,320 @@
+{
+  "eval_set_name": "earth_science_rag_eval_v2",
+  "version": "v2",
+  "created_at": "2026-04-21",
+  "author": "Faye Fang",
+  "corpus_snapshot": {
+    "paper_registry_file": "research_assistant/generated/paper_registry.jsonl",
+    "paper_count": 82,
+    "normalized_datasets_file": "research_assistant/generated/normalized_datasets.jsonl",
+    "dataset_count": 2532
+  },
+  "notes": [
+    "Gold IDs are restricted to entities that actually exist in the local corpus (82 local PDFs or 2532 normalized dataset records). Papers/datasets named in the source literature but absent from the corpus are NOT added to gold_* lists.",
+    "gold_paper_local_ids uses paper_registry.local_id (e.g. '12' = drought_012_xu_2023.pdf).",
+    "gold_dataset_ids uses normalized_datasets.dataset_id (e.g. 'nasa_cmr_mod13a1_061' = MODIS/Terra Vegetation Indices 500m).",
+    "Gold lists are NOT exhaustive — a system retrieving OTHER relevant items is not penalized. But missing ALL of the listed items signals a retrieval failure.",
+    "Categories: recommendation_easy (single clear topic), recommendation_hard (cross-topic synthesis or strong constraints), direct_answer (definition/explanation/paper summary), hybrid (explanation + recommendation), oos (out-of-scope; expected abstention).",
+    "For 'oos' samples, the system is expected to flag uncertainty and refrain from fabricating recommendations; gold_* lists are intentionally empty.",
+    "Several corpus filenames are topic-mislabeled (e.g. groundwater_funk_2015.pdf is actually the CHIRPS paper; soil_moisture_guenther_2006.pdf is the MEGAN isoprene paper). Gold lists use TITLE-based relevance, not filename-based."
+  ],
+
+  "category_distribution": {
+    "recommendation_easy": 8,
+    "recommendation_hard": 2,
+    "direct_answer": 5,
+    "hybrid": 3,
+    "oos": 2,
+    "total": 20
+  },
+
+  "samples": [
+    {
+      "sample_id": "q01_drought_vegetation_central_asia",
+      "category": "recommendation_easy",
+      "answer_mode": "recommendation",
+      "query": "What satellite datasets can I use to study how vegetation responds to drought in Central Asia?",
+      "gold_paper_local_ids": ["12", "10", "5"],
+      "gold_dataset_ids": [
+        "nasa_cmr_mod13a1_061",
+        "nasa_cmr_mod13a2_061",
+        "nasa_cmr_mod13q1_061",
+        "nasa_cmr_mcd15a3h_061",
+        "stac_modis_13a1_061"
+      ],
+      "gold_topic_tags": ["drought", "vegetation", "ndvi", "lai", "central_asia"],
+      "rationale": "Paper #12 (Xu 2023) is the canonical Central Asia vegetation-drought study; #10 and #5 cover adjacent drought-vegetation regions. MODIS Vegetation Indices (MOD13A1/A2/Q1) and LAI (MCD15A3H) are the standard datasets. SPEIbase / GOSIF / ERA5-Land are named in Xu 2023 but absent from the corpus, so not in gold."
+    },
+
+    {
+      "sample_id": "q02_wildfire_detection_global",
+      "category": "recommendation_easy",
+      "answer_mode": "recommendation",
+      "query": "Recommend satellite datasets for detecting active wildfires and quantifying global burned area.",
+      "gold_paper_local_ids": ["76", "77", "79", "80", "64"],
+      "gold_dataset_ids": [
+        "nasa_cmr_mod14a2_061",
+        "nasa_cmr_vnp14_002",
+        "nasa_cmr_mcd64a1_061"
+      ],
+      "gold_topic_tags": ["wildfire", "fire", "burned_area", "emissions"],
+      "rationale": "Papers #76, #79, #80 (van der Werf fire emissions), #77 (Levy MODIS aerosol+fire), and #64 (Werf aerosols_air_quality 2010) are the wildfire/biomass-burning papers. MOD14A2 (Terra thermal anomalies), VNP14 (VIIRS fire), MCD64A1 (burned area) are the canonical fire products."
+    },
+
+    {
+      "sample_id": "q03_soil_moisture_global",
+      "category": "recommendation_easy",
+      "answer_mode": "recommendation",
+      "query": "Which satellite datasets measure global surface and root-zone soil moisture?",
+      "gold_paper_local_ids": ["20", "21"],
+      "gold_dataset_ids": [
+        "nasa_cmr_spl3smp_009",
+        "nasa_cmr_spl3smp_e_006",
+        "nasa_cmr_spl4smgp_008",
+        "nasa_cmr_spl2smap_s_003",
+        "nasa_cmr_spl4smau_008"
+      ],
+      "gold_topic_tags": ["soil_moisture", "evapotranspiration", "smap"],
+      "rationale": "Paper #20 (Martens 2017 — GLEAM) and #21 (Miralles 2011 — global land evaporation) directly cover soil-moisture/evap satellite modeling. SMAP L3/L4 products (SPL3SMP, SPL3SMP_E, SPL4SMGP) are the primary global soil-moisture datasets. Note: papers #15/#16 are filename-mislabeled (actually about MEGAN isoprene emissions) and excluded from gold."
+    },
+
+    {
+      "sample_id": "q04_global_precipitation_satellite",
+      "category": "recommendation_easy",
+      "answer_mode": "recommendation",
+      "query": "What are the best satellite-based global precipitation datasets covering the year 2000 onwards?",
+      "gold_paper_local_ids": ["13", "37", "39", "17", "32", "34", "44", "59"],
+      "gold_dataset_ids": [
+        "nasa_cmr_gpm_3imergdf_07",
+        "nasa_cmr_gpm_3imerghh_07",
+        "nasa_cmr_gpm_3imergdl_07",
+        "nasa_cmr_gpm_3imerghhe_07"
+      ],
+      "gold_topic_tags": ["precipitation", "rainfall", "chirps", "gpm", "imerg"],
+      "rationale": "Multiple corpus copies of Funk et al. 2015 CHIRPS paper (#13, #17, #32, #34, #37, #44, #59 — same paper re-filed under different topic folders). Paper #39 (Harris 2020 CRU TS). CHIRPS itself is NOT in the normalized dataset corpus, so GPM IMERG products are the primary in-corpus dataset match. This query tests whether the system can surface CHIRPS papers even though the dataset record is thin."
+    },
+
+    {
+      "sample_id": "q05_arctic_sea_ice",
+      "category": "recommendation_easy",
+      "answer_mode": "recommendation",
+      "query": "Recommend datasets for studying Arctic sea ice concentration and thickness changes over recent decades.",
+      "gold_paper_local_ids": ["33", "54"],
+      "gold_dataset_ids": [
+        "nasa_cmr_nsidc_0051_2",
+        "nasa_cmr_nsidc_0079_4",
+        "nasa_cmr_atl07_007",
+        "nasa_cmr_atl10_007"
+      ],
+      "gold_topic_tags": ["sea_ice", "arctic", "cryosphere", "icesat"],
+      "rationale": "Paper #33 (Moore 2021 — Nares Strait ice arches) is directly about Arctic sea ice dynamics. Paper #54 (Fretwell 2013 Bedmap2) is Antarctic but covers ice sheet measurement. NSIDC passive-microwave sea ice concentration (0051, 0079) and ICESat-2 sea ice height/freeboard (ATL07, ATL10) are the canonical products."
+    },
+
+    {
+      "sample_id": "q06_ocean_chlorophyll_global",
+      "category": "recommendation_easy",
+      "answer_mode": "recommendation",
+      "query": "Which datasets are available for monitoring global ocean chlorophyll concentration from space?",
+      "gold_paper_local_ids": ["62", "60", "61", "63"],
+      "gold_dataset_ids": [
+        "nasa_cmr_modisa_l3m_chl_2022_0",
+        "nasa_cmr_modisa_l2_oc_2022_0",
+        "nasa_cmr_modisa_l2_oc_nrt_2022_0",
+        "nasa_cmr_olcis3b_l2_efr_oc_2022_0"
+      ],
+      "gold_topic_tags": ["ocean_color", "chlorophyll", "phytoplankton", "modis"],
+      "rationale": "Papers #60-63 are the ocean-color/chlorophyll cluster. Aqua MODIS L3 mapped chlorophyll (MODISA_L3M_CHL) and L2 ocean color (MODISA_L2_OC) are the canonical global products; Sentinel-3 OLCI provides the ESA equivalent."
+    },
+
+    {
+      "sample_id": "q07_pm25_global",
+      "category": "recommendation_easy",
+      "answer_mode": "recommendation",
+      "query": "Which satellite datasets and emission inventories can I use to estimate global surface PM2.5 concentrations?",
+      "gold_paper_local_ids": ["65", "66", "67", "68", "69", "70"],
+      "gold_dataset_ids": [
+        "nasa_cmr_mcd19a2_061",
+        "nasa_cmr_mod04_l2_6_1",
+        "nasa_cmr_myd04_l2_6_1",
+        "nasa_cmr_mod04_3k_6_1",
+        "nasa_cmr_myd04_3k_6_1",
+        "nasa_cmr_aerdb_l2_viirs_snpp_2"
+      ],
+      "gold_topic_tags": ["pm25", "air_quality", "aerosol", "aod"],
+      "rationale": "Papers #65–#70 form the PM2.5 / biomass-burning cluster: Kanakidou 2005 (aerosol modeling), Li 2017 (MIX Asian inventory), Kaiser 2012 (GFAS biomass burning), Reid 2005 (biomass-burning physical properties), Bräuer 2015 (GBD exposure estimation), Zhang 2015 (PM2.5 in China). Standard space-based AOD products for PM2.5 estimation: MAIAC (MCD19A2), MODIS Terra/Aqua aerosol (MOD04/MYD04), and VIIRS Deep Blue aerosol."
+    },
+
+    {
+      "sample_id": "q08_land_cover_change_global",
+      "category": "recommendation_easy",
+      "answer_mode": "recommendation",
+      "query": "Recommend datasets for mapping and monitoring global land cover and land use change over the past two decades.",
+      "gold_paper_local_ids": ["25", "43", "48"],
+      "gold_dataset_ids": [
+        "nasa_cmr_mcd12q1_061",
+        "nasa_cmr_mcd12q2_061",
+        "nasa_cmr_mcd12c1_061",
+        "stac_io_lulc_annual_v02",
+        "stac_io_lulc_9_class"
+      ],
+      "gold_topic_tags": ["land_cover", "land_use", "lulc", "modis", "urban"],
+      "rationale": "Paper #25 (Borrelli 2017) directly assesses global 21st-century land-use change impact; #43 (Costanza 2014) on ecosystem-services change; #48 (Seto 2011) meta-analysis of urban land expansion. MODIS Land Cover Type (MCD12Q1/C1) and Dynamics (MCD12Q2) are the canonical yearly global LULC products; ESRI 10m LULC (io_lulc) provides higher-resolution recent mapping. Note: papers #44-#47 are filename-mislabeled as land_cover but are actually CHIRPS/MEGAN/AI-in-education/SoilGrids — excluded from gold."
+    },
+
+    {
+      "sample_id": "q09_tibetan_plateau_drought_elevation",
+      "category": "recommendation_hard",
+      "answer_mode": "recommendation",
+      "query": "What datasets and prior studies should I combine to analyze how vegetation on the Tibetan Plateau responds to drought across elevation gradients?",
+      "gold_paper_local_ids": ["8", "5", "12"],
+      "gold_dataset_ids": [
+        "nasa_cmr_mod13a1_061",
+        "nasa_cmr_mcd15a3h_061",
+        "nasa_cmr_mod17a2h_061",
+        "stac_cop_dem_glo_30",
+        "stac_cop_dem_glo_90"
+      ],
+      "gold_topic_tags": ["drought", "vegetation", "tibetan_plateau", "elevation", "dem"],
+      "rationale": "Paper #8 (Wang 2021) is the Tibetan Plateau elevation-gradient drought study. The query requires combining a vegetation product (NDVI or LAI or GPP) with a DEM for elevation stratification. Hard because this requires cross-topic synthesis: vegetation + drought + elevation/terrain."
+    },
+
+    {
+      "sample_id": "q10_groundwater_satellite_monitoring",
+      "category": "recommendation_hard",
+      "answer_mode": "recommendation",
+      "query": "How can I monitor regional groundwater storage changes using satellite-based measurements?",
+      "gold_paper_local_ids": [],
+      "gold_dataset_ids": [
+        "nasa_cmr_gracedadm_clsm025gl_7d_3_0",
+        "nasa_cmr_gracedadm_clsm0125us_7d_4_0",
+        "nasa_cmr_gldas_clsm025_da1_d_2_2"
+      ],
+      "gold_topic_tags": ["groundwater", "grace", "hydrology"],
+      "rationale": "GRACE / GRACE-FO derived groundwater products are the canonical answer. Paper #18 (Keesstra 2016) is tangentially about soil/hydrology, and #17 (Funk 2015) is mislabeled as 'groundwater' but actually CHIRPS. The corpus has weak paper-level literature support for this query — this is intentional to test how the system handles strong dataset evidence without strong paper evidence. gold_paper_local_ids left empty to avoid false positives; system should still recommend datasets but flag lower literature support."
+    },
+
+    {
+      "sample_id": "q11_ndvi_definition",
+      "category": "direct_answer",
+      "answer_mode": "direct_answer",
+      "query": "What is NDVI and how is it calculated from satellite imagery?",
+      "gold_paper_local_ids": ["3", "4", "5", "9", "12", "25"],
+      "gold_dataset_ids": [],
+      "gold_topic_tags": ["ndvi", "vegetation_index", "remote_sensing", "definition"],
+      "rationale": "NDVI is defined in virtually every vegetation-drought paper (methods section). Papers #3 (Ji 2003), #4 (Brown 2008 VegDRI), #5 (Wei 2022), #9 (Dong 2019), #12 (Xu 2023), #25 (Borrelli 2017) all contain chunks that define NDVI = (NIR - Red) / (NIR + Red). For a direct_answer query the answer should quote/cite these chunks rather than list datasets; gold_dataset_ids intentionally empty."
+    },
+
+    {
+      "sample_id": "q12_summarize_xu_2023",
+      "category": "direct_answer",
+      "answer_mode": "direct_answer",
+      "query": "Summarize what Xu et al. 2023 studied about cumulative and time-lag effects of vegetation response to drought in Central Asia.",
+      "gold_paper_local_ids": ["12"],
+      "gold_dataset_ids": [],
+      "gold_topic_tags": ["paper_summary", "drought", "time_lag", "central_asia"],
+      "rationale": "This is a paper-specific question. Only paper #12 (drought_012_xu_2023) is directly relevant. The answer should summarize the paper's objective, methods, and findings from its own chunks. Tests whether the system correctly routes to direct_answer mode and retrieves chunks from the specific paper rather than generating generic drought content."
+    },
+
+    {
+      "sample_id": "q13_spei_vs_spi",
+      "category": "direct_answer",
+      "answer_mode": "direct_answer",
+      "query": "What is SPEI and how does it differ from SPI as a meteorological drought index?",
+      "gold_paper_local_ids": ["2", "10", "12", "5"],
+      "gold_dataset_ids": [],
+      "gold_topic_tags": ["spei", "spi", "drought_index", "definition", "methodology"],
+      "rationale": "Paper #2 (Vicente-Serrano 2012) is the original SPEI paper and explicitly contrasts SPEI with SPI (by adding potential evapotranspiration). Papers #5, #10, #12 use both indices and discuss their trade-offs. Direct_answer expects a definitional/comparative response from chunk evidence; no dataset recommendation needed."
+    },
+
+    {
+      "sample_id": "q14_chirps_explanation",
+      "category": "direct_answer",
+      "answer_mode": "direct_answer",
+      "query": "What does the CHIRPS precipitation product provide, and how is it constructed from satellite and station data?",
+      "gold_paper_local_ids": ["13", "17", "32", "34", "37", "44", "59"],
+      "gold_dataset_ids": [],
+      "gold_topic_tags": ["chirps", "precipitation", "methodology", "definition"],
+      "rationale": "CHIRPS is described in Funk et al. 2015 — the same paper appears 7 times in the corpus under different topic-folder labels (flood / groundwater / climate_change / heat_wave / precipitation / land_use_land_cover / sea_surface_temperature). Tests whether the retriever finds the CHIRPS description regardless of filename topic. Answer should define CHIRPS as the Climate Hazards InfraRed Precipitation with Stations product combining TIR satellite estimates with station observations; gold_datasets empty because CHIRPS itself is not in the normalized dataset corpus."
+    },
+
+    {
+      "sample_id": "q15_modis_ndvi_limitations",
+      "category": "direct_answer",
+      "answer_mode": "direct_answer",
+      "query": "What are the main limitations of MODIS NDVI when used for drought monitoring?",
+      "gold_paper_local_ids": ["4", "3", "5", "8", "12"],
+      "gold_dataset_ids": [],
+      "gold_topic_tags": ["ndvi", "limitations", "drought", "saturation", "critique"],
+      "rationale": "Paper #4 (Brown 2008 VegDRI) was specifically designed to overcome NDVI-only limitations by integrating climate data. Papers #3 (Ji 2003), #5 (Wei 2022), #8 (Wang 2021 Tibetan Plateau), #12 (Xu 2023) all discuss NDVI limitations: saturation in dense canopy, time-lag effects, sensitivity to atmospheric/soil-background noise, inability to capture drought directly without climate variables. This query tests the system's ability to surface critical/limitation content, not just positive recommendations."
+    },
+
+    {
+      "sample_id": "q16_spei_hybrid",
+      "category": "hybrid",
+      "answer_mode": "hybrid",
+      "query": "What is SPEI and which papers and datasets should I use to apply it for multi-scale drought analysis?",
+      "gold_paper_local_ids": ["2", "10", "12", "5"],
+      "gold_dataset_ids": [
+        "nasa_cmr_mod13a1_061",
+        "nasa_cmr_gpm_3imergdf_07",
+        "stac_terraclimate"
+      ],
+      "gold_topic_tags": ["spei", "drought_index", "precipitation", "temperature", "methodology"],
+      "rationale": "SPEI (Standardised Precipitation-Evapotranspiration Index) is defined in paper #2 (Serrano 2012) and used in #5, #10, #12. SPEIbase is NOT in the dataset corpus; the closest in-corpus datasets are inputs used to compute SPEI: precipitation (IMERG) and temperature + PET (TerraClimate). Hybrid because it requires BOTH definition (from chunks) AND dataset recommendations."
+    },
+
+    {
+      "sample_id": "q17_lst_urban_heat_hybrid",
+      "category": "hybrid",
+      "answer_mode": "hybrid",
+      "query": "What is land surface temperature (LST) and which satellite datasets should I use to study urban heat islands?",
+      "gold_paper_local_ids": ["48"],
+      "gold_dataset_ids": [
+        "nasa_cmr_mod11a1_061",
+        "nasa_cmr_mod11a2_061",
+        "nasa_cmr_myd11a1_061",
+        "nasa_cmr_myd11a2_061"
+      ],
+      "gold_topic_tags": ["lst", "land_surface_temperature", "urban_heat_island", "modis"],
+      "rationale": "Paper #48 (Seto 2011 — A Meta-Analysis of Global Urban Land Expansion) is the corpus's closest UHI-adjacent paper. LST is best covered through MODIS LST products (MOD11A1 daily, MOD11A2 8-day, plus Aqua equivalents). Hybrid because it asks for both definition of LST and dataset recommendations. This is intentionally weak on paper-side evidence — tests the system's honesty when paper support is thin."
+    },
+
+    {
+      "sample_id": "q18_burned_area_tropical_hybrid",
+      "category": "hybrid",
+      "answer_mode": "hybrid",
+      "query": "What is satellite-derived burned area, and which datasets are best for mapping it in tropical forests?",
+      "gold_paper_local_ids": ["76", "80", "27", "64"],
+      "gold_dataset_ids": [
+        "nasa_cmr_mcd64a1_061",
+        "nasa_cmr_vnp64a1_002",
+        "stac_modis_64a1_061",
+        "copernicus_cds_satellite_fire_burned_area"
+      ],
+      "gold_topic_tags": ["burned_area", "wildfire", "tropical_forest", "deforestation", "mcd64"],
+      "rationale": "Papers #76 (Werf 2010 — Global Fire Emissions) and #80 (Werf 2006 — interannual variability) explicitly cover tropical-forest burning; #27 (Werf 2010 under forest_cover_deforestation folder) is the same paper re-filed; #64 (Werf 2010 under aerosols_air_quality) another copy. MCD64A1 (MODIS monthly burned area), VNP64A1 (VIIRS burned area), and Copernicus CDS satellite-fire burned-area product are the canonical global datasets with explicit tropical coverage. Hybrid expects an LST-like definition of burned-area + dataset list."
+    },
+
+    {
+      "sample_id": "q19_oos_hydrothermal_microbes",
+      "category": "oos",
+      "answer_mode": "recommendation",
+      "query": "Recommend datasets for studying microbial diversity in deep-sea hydrothermal vent ecosystems.",
+      "gold_paper_local_ids": [],
+      "gold_dataset_ids": [],
+      "gold_topic_tags": ["out_of_scope", "microbiology", "deep_sea"],
+      "rationale": "Verified OOS: 'hydrothermal vent' has 0 matches in dataset corpus. Paper #60 (Rusch 2007 Sorcerer II Ocean Sampling) and #61 (Cavicchioli 2019 microorganisms) touch marine microbiology but do not cover vent-specific datasets. Expected behavior: system should flag insufficient evidence; NOT fabricate recommendations."
+    },
+
+    {
+      "sample_id": "q20_oos_earthquake_seismic",
+      "category": "oos",
+      "answer_mode": "recommendation",
+      "query": "What datasets would help me study tectonic plate motion and earthquake recurrence patterns?",
+      "gold_paper_local_ids": [],
+      "gold_dataset_ids": [],
+      "gold_topic_tags": ["out_of_scope", "seismology", "tectonics"],
+      "rationale": "Verified OOS: 'earthquake' 0 matches, 'seismic' 0 matches, 'tsunami' 0 matches in dataset corpus; 'tectonic' has 3 weak matches. No seismic/tectonic papers in the 82-paper library. Expected behavior: system flags insufficient evidence and does not invent datasets from LLM parametric memory (e.g. must not recommend 'USGS earthquake catalog' if that record is not in the evidence block)."
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# Secrets
+.env
+.env.*
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated files (rebuilt by preprocess.py)
+generated/
+
+# Large local data — not tracked in git
+local_database/fulltext_paper/
+local_database/dataset_metadata/
+
+# macOS / editors
+.DS_Store
+.vscode/
+.idea/
