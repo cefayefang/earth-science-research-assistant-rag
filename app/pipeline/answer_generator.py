@@ -24,14 +24,13 @@ Design (matches EPS-210 rubric + Yu et al. 2025 Geo-RAG "verify" pillar):
 """
 import json
 import re
-from openai import OpenAI
-from .config import get_settings, openai_api_key, ROOT
-from .schemas import (
+from ..core.config import get_settings, get_openai_client, ROOT
+from ..core.schemas import (
     ParsedQuery, PaperCandidate, DatasetCandidate, ChunkCandidate,
     FinalAnswer, RecommendedDataset, RecommendedPaper,
     MethodHint, GroundingReport,
 )
-from .dataset_normalizer import load_normalized_datasets
+from ..ingestion.dataset_normalizer import load_normalized_datasets
 
 
 PROMPTS_DIR = ROOT / "prompts"
@@ -45,6 +44,39 @@ _INTENT_TO_PROMPT_FILE = {
     "methodology_support":        "intent_methodology.md",
     "research_starter":           "intent_research_starter.md",
     "other":                      "intent_fallback.md",
+}
+
+# Map ParsedQuery.intent → the name of its PRIMARY output list. Used as a
+# fallback target when the user asked for a count without naming the kind
+# (e.g. bare "再给我两个"). Intents without a single unambiguous primary
+# (research_starter, definition_or_explanation, other) map to None — for
+# those we leave count truncation to the LLM via the prompt.
+_INTENT_TO_PRIMARY_TARGET = {
+    "dataset_recommendation":  "datasets",
+    "paper_recommendation":    "papers",
+    "methodology_support":     "methodology",
+    "paper_specific_question": "papers",
+    "research_starter":        None,
+    "definition_or_explanation": None,
+    "other":                   None,
+}
+
+
+def _resolve_count_target(parsed_intent: str, explicit_target: str | None) -> str | None:
+    """Pick the output list the requested_count applies to.
+
+    Priority: explicit target from the user > intent's primary output.
+    Returns one of "datasets" / "papers" / "methodology" / None.
+    """
+    if explicit_target in {"datasets", "papers", "methodology"}:
+        return explicit_target
+    return _INTENT_TO_PRIMARY_TARGET.get(parsed_intent)
+
+
+_TARGET_LABEL = {
+    "datasets":    "recommended_datasets",
+    "papers":      "recommended_papers",
+    "methodology": "methodology_hints",
 }
 
 
@@ -63,15 +95,47 @@ def _assemble_prompt(
     chunks_text: str,
     query: str,
     answer_mode: str,
+    requested_count: int | None = None,
+    requested_count_target: str | None = None,
 ) -> str:
-    """Compose final LLM prompt = base_rules + intent-specific + evidence + query."""
+    """Compose final LLM prompt = base_rules + intent-specific + evidence + query.
+
+    If `requested_count` is set, a COUNT CONSTRAINT section is appended that
+    overrides the default range in the intent-specific template for the chosen
+    target list.
+    """
     base = _load_prompt_file("base_rules.md")
     intent_file = _INTENT_TO_PROMPT_FILE.get(intent, "intent_fallback.md")
     intent_specific = _load_prompt_file(intent_file)
 
+    count_section = ""
+    if requested_count and requested_count > 0:
+        target = _resolve_count_target(intent, requested_count_target)
+        target_field = _TARGET_LABEL.get(target) if target else None
+        if target_field:
+            count_section = (
+                f"\n--- COUNT CONSTRAINT (overrides intent template) ---\n"
+                f"The user explicitly asked for exactly {requested_count} items. "
+                f"Return EXACTLY {requested_count} entries in `{target_field}`. "
+                f"If fewer than {requested_count} items in the evidence block pass "
+                f"the grounding rules, return as many as are well-supported and "
+                f"add a note to `uncertainty_notes` explaining the shortfall. "
+                f"Other output lists still follow the intent template's default ranges.\n"
+            )
+        else:
+            # User named a count but the intent has no clear primary output (e.g.
+            # research_starter). Pass the count through as a soft guideline.
+            count_section = (
+                f"\n--- COUNT CONSTRAINT (soft) ---\n"
+                f"The user asked for about {requested_count} items. Try to honor "
+                f"that number in the most relevant output list while keeping the "
+                f"overall shape consistent with the intent template.\n"
+            )
+
     return (
         f"{base}\n\n"
-        f"--- INTENT-SPECIFIC OUTPUT SHAPE ---\n{intent_specific}\n\n"
+        f"--- INTENT-SPECIFIC OUTPUT SHAPE ---\n{intent_specific}\n"
+        f"{count_section}\n"
         f"--- EVIDENCE BLOCK ---\n"
         f"--- DATASETS (cite as [DS-N]) ---\n{datasets_text}\n\n"
         f"--- PAPERS (cite as [P-N]) ---\n{papers_text}\n\n"
@@ -285,7 +349,7 @@ def generate_answer(
 ) -> tuple[FinalAnswer, str]:
     """Returns (final_answer, evidence_block_text)."""
     cfg = get_settings()
-    client = OpenAI(api_key=openai_api_key())
+    client = get_openai_client()
 
     ds_lookup = {d.dataset_id: d for d in load_normalized_datasets()}
 
@@ -307,6 +371,8 @@ def generate_answer(
         chunks_text=chunks_text,
         query=parsed_query.original_query,
         answer_mode=parsed_query.answer_mode,
+        requested_count=parsed_query.requested_count,
+        requested_count_target=parsed_query.requested_count_target,
     )
 
     response = client.chat.completions.create(
@@ -419,6 +485,19 @@ def generate_answer(
         ))
 
     uncertainty_notes = list(answer_json.get("uncertainty_notes") or [])
+
+    # Safety net for requested_count: if the user asked for exactly N items in a
+    # specific list, truncate that list to N even if the LLM over-produced.
+    # (Under-production stays as-is so we don't fabricate to hit the count.)
+    if parsed_query.requested_count and parsed_query.requested_count > 0:
+        n = parsed_query.requested_count
+        target = _resolve_count_target(parsed_query.intent, parsed_query.requested_count_target)
+        if target == "datasets" and len(rec_datasets) > n:
+            rec_datasets = rec_datasets[:n]
+        elif target == "papers" and len(rec_papers) > n:
+            rec_papers = rec_papers[:n]
+        elif target == "methodology" and len(method_hints) > n:
+            method_hints = method_hints[:n]
 
     # Phase 9: hard-enforced abstention when evidence block is sparse.
     # If all three evidence sections were filtered empty by the relevance threshold,

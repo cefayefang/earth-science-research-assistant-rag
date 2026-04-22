@@ -14,11 +14,12 @@ None for that paper (no crash).
 """
 import json
 import time
+from functools import lru_cache
 from pathlib import Path
 import pandas as pd
-from .config import get_settings, ROOT
-from .schemas import PaperRecord
-from .openalex_client import fetch_work_by_openalex_id
+from ..core.config import get_settings, ROOT
+from ..core.schemas import PaperRecord
+from ..clients.openalex_client import fetch_work_by_openalex_id
 
 
 # Rate limit under OpenAlex's polite-pool limit (10 req/sec)
@@ -115,6 +116,7 @@ def build_paper_registry(enrich: bool = True) -> list[PaperRecord]:
     return records
 
 
+@lru_cache(maxsize=1)
 def load_paper_registry() -> list[PaperRecord]:
     cfg = get_settings()
     path = ROOT / cfg["paths"]["paper_registry_path"]

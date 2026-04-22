@@ -201,7 +201,8 @@
       "gold_paper_local_ids": ["3", "4", "5", "9", "12", "25"],
       "gold_dataset_ids": [],
       "gold_topic_tags": ["ndvi", "vegetation_index", "remote_sensing", "definition"],
-      "rationale": "NDVI is defined in virtually every vegetation-drought paper (methods section). Papers #3 (Ji 2003), #4 (Brown 2008 VegDRI), #5 (Wei 2022), #9 (Dong 2019), #12 (Xu 2023), #25 (Borrelli 2017) all contain chunks that define NDVI = (NIR - Red) / (NIR + Red). For a direct_answer query the answer should quote/cite these chunks rather than list datasets; gold_dataset_ids intentionally empty."
+      "rationale": "NDVI is defined in virtually every vegetation-drought paper (methods section). Papers #3 (Ji 2003), #4 (Brown 2008 VegDRI), #5 (Wei 2022), #9 (Dong 2019), #12 (Xu 2023), #25 (Borrelli 2017) all contain chunks that define NDVI = (NIR - Red) / (NIR + Red). For a direct_answer query the answer should quote/cite these chunks rather than list datasets; gold_dataset_ids intentionally empty.",
+      "gold_reference_answer": "NDVI (Normalized Difference Vegetation Index) is calculated as (NIR - Red) / (NIR + Red), where NIR is the near-infrared reflectance and Red is the red-band reflectance from satellite imagery. Values range from -1 to +1; values near 0 indicate bare soil or sparse vegetation, while values approaching 1 indicate dense, healthy vegetation. NDVI saturates at high biomass densities and is sensitive to atmospheric aerosols and soil background noise."
     },
 
     {
@@ -212,7 +213,8 @@
       "gold_paper_local_ids": ["12"],
       "gold_dataset_ids": [],
       "gold_topic_tags": ["paper_summary", "drought", "time_lag", "central_asia"],
-      "rationale": "This is a paper-specific question. Only paper #12 (drought_012_xu_2023) is directly relevant. The answer should summarize the paper's objective, methods, and findings from its own chunks. Tests whether the system correctly routes to direct_answer mode and retrieves chunks from the specific paper rather than generating generic drought content."
+      "rationale": "This is a paper-specific question. Only paper #12 (drought_012_xu_2023) is directly relevant. The answer should summarize the paper's objective, methods, and findings from its own chunks. Tests whether the system correctly routes to direct_answer mode and retrieves chunks from the specific paper rather than generating generic drought content.",
+      "gold_reference_answer": null
     },
 
     {
@@ -223,7 +225,8 @@
       "gold_paper_local_ids": ["2", "10", "12", "5"],
       "gold_dataset_ids": [],
       "gold_topic_tags": ["spei", "spi", "drought_index", "definition", "methodology"],
-      "rationale": "Paper #2 (Vicente-Serrano 2012) is the original SPEI paper and explicitly contrasts SPEI with SPI (by adding potential evapotranspiration). Papers #5, #10, #12 use both indices and discuss their trade-offs. Direct_answer expects a definitional/comparative response from chunk evidence; no dataset recommendation needed."
+      "rationale": "Paper #2 (Vicente-Serrano 2012) is the original SPEI paper and explicitly contrasts SPEI with SPI (by adding potential evapotranspiration). Papers #5, #10, #12 use both indices and discuss their trade-offs. Direct_answer expects a definitional/comparative response from chunk evidence; no dataset recommendation needed.",
+      "gold_reference_answer": "SPEI (Standardised Precipitation-Evapotranspiration Index) extends SPI (Standardised Precipitation Index) by incorporating potential evapotranspiration (PET) in addition to precipitation anomalies. SPI quantifies precipitation deficits relative to the long-term climatological distribution; SPEI computes the water-balance deficit (precipitation minus PET) and then standardises it, making SPEI sensitive to both precipitation deficits and temperature-driven increases in atmospheric water demand. SPEI can be computed at multiple time scales (1, 3, 6, 12 months) and is more appropriate than SPI for detecting drought under warming climates because rising temperatures increase PET even without any change in precipitation."
     },
 
     {
@@ -234,7 +237,8 @@
       "gold_paper_local_ids": ["13", "17", "32", "34", "37", "44", "59"],
       "gold_dataset_ids": [],
       "gold_topic_tags": ["chirps", "precipitation", "methodology", "definition"],
-      "rationale": "CHIRPS is described in Funk et al. 2015 — the same paper appears 7 times in the corpus under different topic-folder labels (flood / groundwater / climate_change / heat_wave / precipitation / land_use_land_cover / sea_surface_temperature). Tests whether the retriever finds the CHIRPS description regardless of filename topic. Answer should define CHIRPS as the Climate Hazards InfraRed Precipitation with Stations product combining TIR satellite estimates with station observations; gold_datasets empty because CHIRPS itself is not in the normalized dataset corpus."
+      "rationale": "CHIRPS is described in Funk et al. 2015 — the same paper appears 7 times in the corpus under different topic-folder labels (flood / groundwater / climate_change / heat_wave / precipitation / land_use_land_cover / sea_surface_temperature). Tests whether the retriever finds the CHIRPS description regardless of filename topic. Answer should define CHIRPS as the Climate Hazards InfraRed Precipitation with Stations product combining TIR satellite estimates with station observations; gold_datasets empty because CHIRPS itself is not in the normalized dataset corpus.",
+      "gold_reference_answer": "CHIRPS (Climate Hazards InfraRed Precipitation with Stations) is a quasi-global precipitation dataset spanning 1981 to near-present at approximately 5 km (0.05°) spatial resolution. It is constructed by blending thermal infrared satellite-based rainfall estimates (derived from the TMPA and CPC morphed technique) with quality-controlled rain-gauge station observations. The satellite component provides spatial coverage in data-sparse regions, while the station data constrain satellite estimates to reduce systematic bias. CHIRPS is widely used for drought monitoring, agricultural early warning, and hydrological modelling, particularly in Africa and Latin America where dense gauge networks are absent."
     },
 
     {
@@ -245,7 +249,8 @@
       "gold_paper_local_ids": ["4", "3", "5", "8", "12"],
       "gold_dataset_ids": [],
       "gold_topic_tags": ["ndvi", "limitations", "drought", "saturation", "critique"],
-      "rationale": "Paper #4 (Brown 2008 VegDRI) was specifically designed to overcome NDVI-only limitations by integrating climate data. Papers #3 (Ji 2003), #5 (Wei 2022), #8 (Wang 2021 Tibetan Plateau), #12 (Xu 2023) all discuss NDVI limitations: saturation in dense canopy, time-lag effects, sensitivity to atmospheric/soil-background noise, inability to capture drought directly without climate variables. This query tests the system's ability to surface critical/limitation content, not just positive recommendations."
+      "rationale": "Paper #4 (Brown 2008 VegDRI) was specifically designed to overcome NDVI-only limitations by integrating climate data. Papers #3 (Ji 2003), #5 (Wei 2022), #8 (Wang 2021 Tibetan Plateau), #12 (Xu 2023) all discuss NDVI limitations: saturation in dense canopy, time-lag effects, sensitivity to atmospheric/soil-background noise, inability to capture drought directly without climate variables. This query tests the system's ability to surface critical/limitation content, not just positive recommendations.",
+      "gold_reference_answer": "Key limitations of MODIS NDVI for drought monitoring include: (1) signal saturation in dense canopies where NDVI exceeds roughly 0.7, making it insensitive to further biomass increases; (2) time-lag effects whereby vegetation response to drought onset is delayed by weeks to months, complicating near-real-time monitoring; (3) sensitivity to atmospheric aerosols, dust, and bidirectional reflectance that introduce noise unrelated to vegetation state; (4) soil background contamination in sparse or open vegetation, where bare-soil reflectance influences the index; and (5) an inability to directly measure water stress — NDVI integrates the effect of drought rather than soil moisture deficit directly, requiring supplementary climate variables such as precipitation anomalies or SPEI for rigorous drought attribution."
     },
 
     {

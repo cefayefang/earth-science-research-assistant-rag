@@ -3,10 +3,11 @@ from functools import lru_cache
 import yaml
 from dotenv import load_dotenv
 import os
+from openai import OpenAI
 
 load_dotenv()
 
-ROOT = Path(__file__).parent.parent
+ROOT = Path(__file__).parent.parent.parent
 
 
 @lru_cache(maxsize=1)
@@ -30,3 +31,8 @@ def openai_api_key() -> str:
     if not key:
         raise RuntimeError("OPENAI_API_KEY not set in .env")
     return key
+
+
+@lru_cache(maxsize=1)
+def get_openai_client() -> OpenAI:
+    return OpenAI(api_key=openai_api_key())

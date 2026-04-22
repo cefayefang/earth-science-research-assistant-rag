@@ -19,12 +19,12 @@ This module does NOT compute the final `dataset_score`. That is done in
 """
 import json
 import numpy as np
-from .config import get_settings, ROOT
-from .schemas import ParsedQuery, NormalizedDataset, DatasetCandidate
-from .embedder import get_dataset_collection, query_embedding, embed_datasets, get_embedding_model
-from .dataset_normalizer import load_normalized_datasets
-from .zenodo_client import fetch_zenodo_datasets
-from .spatial_temporal_match import (
+from ..core.config import get_settings, ROOT
+from ..core.schemas import ParsedQuery, NormalizedDataset, DatasetCandidate
+from ..ingestion.embedder import get_dataset_collection, query_embedding, embed_datasets, get_embedding_model
+from ..ingestion.dataset_normalizer import load_normalized_datasets
+from ..clients.zenodo_client import fetch_zenodo_datasets
+from ..core.spatial_temporal_match import (
     parse_dataset_bbox, parse_dataset_temporal,
     bbox_overlap_score, temporal_overlap_score,
 )

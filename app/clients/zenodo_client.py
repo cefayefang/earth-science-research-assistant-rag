@@ -1,14 +1,15 @@
 import json
+import re
 import requests
-from .config import get_settings, ROOT
-from .schemas import NormalizedDataset
+from ..core.config import get_settings, ROOT
+from ..core.schemas import NormalizedDataset
 
 
 def _slug(raw_id: str) -> str:
     return f"zenodo_{raw_id}"
 
 
-def fetch_zenodo_datasets(query: str, openalex_dois: set[str]) -> list[NormalizedDataset]:
+def fetch_zenodo_datasets(query: str, openalex_dois: set[str]) -> list[tuple[NormalizedDataset, bool]]:
     cfg = get_settings()
     z_cfg = cfg["zenodo"]
 
@@ -37,7 +38,7 @@ def fetch_zenodo_datasets(query: str, openalex_dois: set[str]) -> list[Normalize
         title = meta.get("title", "")
         desc = meta.get("description", "") or ""
         # strip HTML tags from description
-        desc = __import__("re").sub(r"<[^>]+>", " ", desc).strip()
+        desc = re.sub(r"<[^>]+>", " ", desc).strip()
         keywords_raw = meta.get("keywords", [])
         keywords = [k if isinstance(k, str) else k.get("tag", "") for k in keywords_raw]
 

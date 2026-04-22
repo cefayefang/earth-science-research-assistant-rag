@@ -3,8 +3,8 @@ from sentence_transformers import SentenceTransformer
 import chromadb
 from chromadb.config import Settings
 from pathlib import Path
-from .config import get_settings, ROOT
-from .schemas import NormalizedDataset, Chunk
+from ..core.config import get_settings, ROOT
+from ..core.schemas import NormalizedDataset, Chunk
 
 
 @lru_cache(maxsize=1)

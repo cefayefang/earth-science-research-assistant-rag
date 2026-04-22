@@ -37,13 +37,13 @@ LLM at answer-generation time via a prompt rule, not in this module.
 import json
 import math
 import datetime
-from .config import get_settings, ROOT
-from .schemas import (
+from ..core.config import get_settings, ROOT
+from ..core.schemas import (
     OpenAlexPaper, PaperMatch, PaperCandidate,
     DatasetCandidate, ChunkCandidate, PaperRecord,
 )
-from .embedder import query_embedding, get_embedding_model
-from .paper_registry import load_paper_registry
+from ..ingestion.embedder import query_embedding, get_embedding_model
+from ..ingestion.paper_registry import load_paper_registry
 import numpy as np
 
 CURRENT_YEAR = datetime.date.today().year
@@ -73,10 +73,10 @@ def rerank_papers(
     its own formula, select via the local/external quota, and return a flat
     ranked list.
 
-    When `exclude_paper_ids` is provided (by the caller — typically only when
-    the conversation-analyzer's `wants_fresh_recommendations` flag is True),
-    papers whose local_id or openalex_id appears in the set are dropped at the
-    selection step so the user sees genuinely new recommendations.
+    When `exclude_paper_ids` is provided (by the caller — in practice only on
+    `re_recommend` turns, where main._run_pipeline pulls the list out of the
+    session state), papers whose local_id or openalex_id appears in the set are
+    dropped at the selection step so the user sees genuinely new recommendations.
     """
     exclude_set = set(exclude_paper_ids or [])
     cfg = get_settings()

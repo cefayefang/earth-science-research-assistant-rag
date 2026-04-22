@@ -1,6 +1,6 @@
 import re
 import tiktoken
-from .schemas import ParsedPaper, Chunk
+from ..core.schemas import ParsedPaper, Chunk
 
 _TOKENIZER = tiktoken.get_encoding("cl100k_base")
 

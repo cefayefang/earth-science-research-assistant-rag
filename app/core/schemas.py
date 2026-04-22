@@ -1,5 +1,85 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
+
+
+# ── Intent classification ─────────────────────────────────────────────────────
+
+class IntentClassification(BaseModel):
+    intent_type: str  # chitchat | new_question | re_recommend | detail_followup | out_of_scope
+    confidence: float = 0.8
+    target_ref: Optional[str] = None      # for detail_followup: which item
+    # For detail_followup: WHICH KIND of item the user is asking about.
+    # "paper" / "dataset" / null (ambiguous — e.g. "the first one", "tell me more").
+    # Ambiguous cases fall back to a paper-first lookup in _handle_detail_followup.
+    target_kind: Optional[str] = None
+    rewritten_query: Optional[str] = None  # for re_recommend: expanded retrieval query
+    # User-specified count like "推两个 dataset" / "give me 3 papers". Null when unspecified.
+    # The target names which output list the count applies to. When the user names a
+    # kind ("two datasets"), target is set; when the user says a bare number with no
+    # kind, target is null and the downstream layer falls back to the intent's primary
+    # output.
+    requested_count: Optional[int] = None
+    requested_count_target: Optional[str] = None  # "datasets" | "papers" | "methodology"
+
+
+class CachedChunk(BaseModel):
+    """Serializable snapshot of a chunk for session state storage."""
+    chunk_id: str
+    local_id: str
+    text: str
+    section_guess: Optional[str] = None
+
+
+class SessionPaper(BaseModel):
+    """Minimal paper info stored per-turn for detail_followup resolution."""
+    position: int       # 1-indexed rank in the recommendation list
+    title: str
+    local_id: Optional[str] = None
+    openalex_id: Optional[str] = None
+
+
+class SessionDataset(BaseModel):
+    position: int
+    title: str
+    dataset_id: str
+
+
+class SessionDatasetMetadata(BaseModel):
+    """Serializable slice of NormalizedDataset for datasets whose source is
+    EPHEMERAL (currently Zenodo — fetched fresh each query, not written to
+    normalized_datasets.jsonl). Persisting this per-turn lets
+    `_answer_from_dataset` answer detail follow-ups about Zenodo records
+    without having to re-hit the Zenodo API. `raw_metadata` is intentionally
+    excluded to keep session state small.
+    """
+    dataset_id: str
+    display_name: str
+    source: str
+    provider: Optional[str] = None
+    doi: Optional[str] = None
+    description: Optional[str] = None
+    variables: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    spatial_info: Optional[str] = None
+    temporal_info: Optional[str] = None
+
+
+class SessionState(BaseModel):
+    """Client-side session state. Sent with every request; returned updated."""
+    # Accumulated IDs across turns — used for re_recommend exclusion
+    recommended_paper_ids: list[str] = Field(default_factory=list)
+    recommended_dataset_ids: list[str] = Field(default_factory=list)
+    # Positional info from the last RAG turn — for detail_followup resolution
+    last_recommended_papers: list[SessionPaper] = Field(default_factory=list)
+    last_recommended_datasets: list[SessionDataset] = Field(default_factory=list)
+    # Chunks retrieved in the last RAG turn
+    last_turn_chunks: list[CachedChunk] = Field(default_factory=list)
+    # Metadata for last-turn-recommended datasets whose source is ephemeral
+    # (currently Zenodo). Baked sources (nasa_cmr / stac / copernicus_cds /
+    # cdse) do NOT appear here — they're re-looked-up from
+    # load_normalized_datasets().
+    last_turn_ephemeral_dataset_metadata: list[SessionDatasetMetadata] = Field(default_factory=list)
+    turn_count: int = 0
 
 
 # ── Query parsing ─────────────────────────────────────────────────────────────
@@ -26,19 +106,15 @@ class ParsedQuery(BaseModel):
     # Phase 4: structured spatial/temporal matching
     region_bbox: Optional[list[float]] = None        # [min_lon, min_lat, max_lon, max_lat]
     parsed_timescale: Optional[list[str]] = None     # [ISO_start, ISO_end]
-    # True only for EXPANSION follow-ups ("more papers", "different ones"). When
-    # True, the reranker will filter out exclude_paper_ids / exclude_dataset_ids
-    # so new items surface. False for focus shifts / drill-downs / new topics.
+    # True only for EXPANSION follow-ups ("more papers", "different ones"). Set
+    # authoritatively by the caller based on intent_classifier's `re_recommend`
+    # verdict. When True, the reranker will filter out exclude_paper_ids /
+    # exclude_dataset_ids so new items surface.
     wants_fresh_recommendations: bool = False
-
-
-class ConversationDigest(BaseModel):
-    """Result of a standalone LLM call that looks at prior turns + the current
-    query and distills a short topical summary plus routing hints."""
-    summary: str                                   # 2–3 sentence context summary
-    wants_fresh_recommendations: bool = False      # True for expansion follow-ups
-    intent_shift_hint: Optional[str] = None        # e.g., "methodology_support" when
-                                                   # the follow-up shifts focus
+    # User-specified count for the primary output list, threaded down from
+    # IntentClassification. See IntentClassification for field semantics.
+    requested_count: Optional[int] = None
+    requested_count_target: Optional[str] = None  # "datasets" | "papers" | "methodology"
 
 
 # ── Paper registry ────────────────────────────────────────────────────────────
@@ -233,17 +309,12 @@ class ConversationMessage(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str
-    # Optional multi-turn conversation history (most recent last).
-    # Used so that follow-up queries like "more papers" or "what about datasets"
-    # can inherit topic/region/timescale from previous turns.
     history: list[ConversationMessage] | None = None
-    # IDs from the immediately previous turn's recommendations. The UI sends
-    # these so the backend can filter them out — but only when the LLM's
-    # ConversationDigest marks wants_fresh_recommendations=True (i.e. the
-    # current query is an expansion like "more papers", not a focus shift or
-    # drill-down). If unset / empty, no exclusion is attempted.
+    # Kept for backwards compat; new clients should rely on session_state instead.
     exclude_paper_ids: list[str] | None = None
     exclude_dataset_ids: list[str] | None = None
+    # Full session state from the previous turn (None on first turn).
+    session_state: Optional[SessionState] = None
 
 
 class QueryResponse(BaseModel):
@@ -255,3 +326,6 @@ class QueryResponse(BaseModel):
     methodology_hints: list[MethodHint] = Field(default_factory=list)
     uncertainty_notes: list[str] = Field(default_factory=list)
     grounding_report: Optional[GroundingReport] = None
+    # Updated session state to store client-side and send back next turn.
+    session_state: Optional[SessionState] = None
+    intent_type: Optional[str] = None

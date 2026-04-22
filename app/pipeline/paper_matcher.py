@@ -1,8 +1,8 @@
 import json
 from rapidfuzz import fuzz
-from .config import ROOT
-from .schemas import OpenAlexPaper, PaperMatch
-from .paper_registry import load_paper_registry
+from ..core.config import ROOT
+from ..core.schemas import OpenAlexPaper, PaperMatch
+from ..ingestion.paper_registry import load_paper_registry
 
 
 def _normalize(s: str) -> str:
@@ -13,6 +13,7 @@ def match_papers(openalex_papers: list[OpenAlexPaper]) -> list[PaperMatch]:
     registry = load_paper_registry()
 
     registry_by_openalex = {r.openalex_id.lower(): r for r in registry if r.openalex_id}
+    registry_by_doi = {r.doi.lower(): r for r in registry if r.doi}
     registry_by_title = {_normalize(r.original_title): r for r in registry}
 
     matches: list[PaperMatch] = []
@@ -27,8 +28,9 @@ def match_papers(openalex_papers: list[OpenAlexPaper]) -> list[PaperMatch]:
 
         # 2. DOI match
         if local_id is None and paper.doi:
-            for r in registry:
-                pass  # DOI not stored in registry currently — skip
+            doi_key = paper.doi.lower().strip()
+            if doi_key in registry_by_doi:
+                local_id = registry_by_doi[doi_key].local_id
 
         # 3. Normalized title exact match
         if local_id is None:

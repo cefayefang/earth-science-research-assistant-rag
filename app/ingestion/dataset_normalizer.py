@@ -2,8 +2,8 @@ import json
 import re
 from functools import lru_cache
 from pathlib import Path
-from .config import get_settings, ROOT
-from .schemas import NormalizedDataset
+from ..core.config import get_settings, ROOT
+from ..core.schemas import NormalizedDataset
 
 
 def _slug(source: str, raw_id: str) -> str:
@@ -13,6 +13,25 @@ def _slug(source: str, raw_id: str) -> str:
 
 def _join(items: list) -> str:
     return ", ".join(str(i) for i in items if i)
+
+
+def _extract_variables(col: dict) -> list[str]:
+    """Best-effort variable extraction for sources without a fixed schema.
+    Tries common field names used by CDS and CDSE APIs."""
+    for key in ("variables", "variable", "parameters"):
+        raw = col.get(key)
+        if isinstance(raw, list) and raw:
+            return [str(v) for v in raw if v]
+        if isinstance(raw, dict) and raw:
+            return list(raw.keys())
+    # STAC-style summaries block
+    summaries = col.get("summaries", {})
+    if isinstance(summaries, dict):
+        for key in ("variable", "variables"):
+            sv = summaries.get(key)
+            if isinstance(sv, list) and sv:
+                return [str(v) for v in sv if v]
+    return []
 
 
 # ── Per-source normalizers ────────────────────────────────────────────────────
@@ -98,8 +117,9 @@ def _from_copernicus_cds(col: dict) -> NormalizedDataset:
     title = col.get("title", raw_id)
     desc = col.get("description", "") or col.get("abstract", "")
     keywords = col.get("keywords", [])
+    variables = _extract_variables(col)
 
-    retrieval_text = f"{title}. {desc}. Keywords: {_join(keywords)}.".strip()
+    retrieval_text = f"{title}. {desc}. Variables: {_join(variables)}. Keywords: {_join(keywords)}.".strip()
 
     return NormalizedDataset(
         dataset_id=_slug("copernicus_cds", raw_id),
@@ -109,7 +129,7 @@ def _from_copernicus_cds(col: dict) -> NormalizedDataset:
         display_name=title,
         description=desc,
         keywords=keywords,
-        variables=[],
+        variables=variables,
         provider="Copernicus Climate Data Store",
         spatial_info=None,
         temporal_info=None,
@@ -123,6 +143,7 @@ def _from_cdse(col: dict) -> NormalizedDataset:
     title = col.get("title", raw_id)
     desc = col.get("description", "")
     keywords = col.get("keywords", [])
+    variables = _extract_variables(col)
 
     extent = col.get("extent", {})
     bbox = extent.get("spatial", {}).get("bbox", [[]])[0]
@@ -133,7 +154,7 @@ def _from_cdse(col: dict) -> NormalizedDataset:
     t_end = (interval[1] or "")[:10]
     temporal = f"{t_start} to {t_end}" if t_start else None
 
-    retrieval_text = f"{title}. {desc}. Keywords: {_join(keywords)}. Region: {spatial}. Time: {temporal}.".strip()
+    retrieval_text = f"{title}. {desc}. Variables: {_join(variables)}. Keywords: {_join(keywords)}. Region: {spatial}. Time: {temporal}.".strip()
 
     return NormalizedDataset(
         dataset_id=_slug("cdse", raw_id),
@@ -143,7 +164,7 @@ def _from_cdse(col: dict) -> NormalizedDataset:
         display_name=title,
         description=desc,
         keywords=keywords,
-        variables=[],
+        variables=variables,
         provider="Copernicus Data Space / ESA",
         spatial_info=spatial,
         temporal_info=temporal,
@@ -197,7 +218,7 @@ def normalize_all_datasets() -> list[NormalizedDataset]:
                     all_records.append(record)
                     count += 1
             except Exception as e:
-                pass
+                print(f"  [normalizer warn] {filename}: skipped entry — {e}")
 
         print(f"  {filename}: {count} records normalized")
 

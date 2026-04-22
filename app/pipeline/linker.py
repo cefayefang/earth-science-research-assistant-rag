@@ -2,9 +2,9 @@ import json
 import re
 from pathlib import Path
 from rapidfuzz import fuzz
-from .config import get_settings, ROOT
-from .schemas import DatasetCandidate, ChunkCandidate, OpenAlexPaper, DatasetLink
-from .dataset_normalizer import load_normalized_datasets
+from ..core.config import get_settings, ROOT
+from ..core.schemas import DatasetCandidate, ChunkCandidate, OpenAlexPaper, DatasetLink
+from ..ingestion.dataset_normalizer import load_normalized_datasets
 
 
 def _load_aliases() -> dict[str, str]:

@@ -2,20 +2,20 @@
 Preprocessing pipeline — run once before serving queries.
 
 Usage:
-    python -m app.preprocess
+    python -m app.ingestion.preprocess
 """
 
 import json
 from pathlib import Path
 from tqdm import tqdm
 
-from .config import get_settings, ROOT
+from ..core.config import get_settings, ROOT
 from .paper_registry import build_paper_registry
 from .dataset_normalizer import normalize_all_datasets
 from .pdf_extractor import extract_pdf
 from .chunker import chunk_paper
 from .embedder import embed_datasets, embed_chunks
-from .schemas import Chunk
+from ..core.schemas import Chunk, ParsedPaper
 
 
 def run_preprocessing():
@@ -42,7 +42,6 @@ def run_preprocessing():
         if cache_path.exists():
             with open(cache_path) as f:
                 parsed_data = json.load(f)
-            from .schemas import ParsedPaper
             parsed = ParsedPaper.model_validate(parsed_data)
         else:
             parsed = extract_pdf(pdf_path, paper_record.local_id, paper_record.openalex_id)

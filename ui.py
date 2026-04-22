@@ -39,15 +39,7 @@ STRENGTH_ICON = {"high": "🟢", "medium": "🟡", "low": "🔴"}
 
 
 def _flatten_content(content) -> str:
-    """Normalize Gradio chatbot message content to a plain string.
-
-    Depending on Gradio version, `content` may be:
-      - a plain string (older versions / simple text)
-      - a list of {text, type} dicts (newer versions, multi-modal format)
-      - None (dangling message)
-
-    We flatten everything into a single string for transport to the backend.
-    """
+    """Normalize Gradio chatbot message content to a plain string."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -60,7 +52,6 @@ def _flatten_content(content) -> str:
             elif isinstance(item, str):
                 parts.append(item)
         return " ".join(parts).strip()
-    # fallback for unexpected types
     return str(content)
 
 
@@ -98,25 +89,27 @@ def _fmt_papers(items: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-def ask(query: str, history: list, last_ids: dict):
-    """last_ids is a gr.State dict: {"papers": [...], "datasets": [...]} tracking
-    the immediately previous turn's recommended IDs. Sent to the backend every
-    turn; backend only ACTUALLY applies them as filters when the analyzer
-    marks the current query as an expansion follow-up."""
+def ask(query: str, history: list, session_state: dict):
+    """Main chat handler.
+
+    session_state is a gr.State dict that mirrors the backend SessionState:
+      recommended_paper_ids, recommended_dataset_ids,
+      last_recommended_papers, last_recommended_datasets,
+      last_turn_chunks, turn_count
+    """
     if not query.strip():
-        yield history, _fmt_datasets([]), _fmt_papers([]), "", last_ids
+        yield history, _fmt_datasets([]), _fmt_papers([]), "", session_state
         return
 
     pending = history + [
         {"role": "user", "content": query},
         {"role": "assistant", "content": "⏳ Thinking…"},
     ]
-    yield pending, _fmt_datasets([]), _fmt_papers([]), "", last_ids
+    yield pending, _fmt_datasets([]), _fmt_papers([]), "", session_state
 
-    # Normalize Gradio's content format (string or structured list of dicts)
-    # before sending to the backend schema (which expects a string).
+    # Build conversation history for the API (last 10 turns = 20 messages, excluding pending)
     prior = []
-    for m in history:
+    for m in history[-6:]:
         if not isinstance(m, dict):
             continue
         role = m.get("role")
@@ -127,17 +120,13 @@ def ask(query: str, history: list, last_ids: dict):
             continue
         prior.append({"role": role, "content": content})
 
-    last_paper_ids = (last_ids or {}).get("papers") or []
-    last_dataset_ids = (last_ids or {}).get("datasets") or []
-
     try:
         r = httpx.post(
             f"{API_URL}/query",
             json={
                 "query": query,
                 "history": prior or None,
-                "exclude_paper_ids": last_paper_ids or None,
-                "exclude_dataset_ids": last_dataset_ids or None,
+                "session_state": session_state or None,
             },
             timeout=120,
         )
@@ -145,7 +134,10 @@ def ask(query: str, history: list, last_ids: dict):
         data = r.json()
     except httpx.TimeoutException:
         msg = "Request timed out. Please try again."
-        yield history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}], _fmt_datasets([]), _fmt_papers([]), "", last_ids
+        yield (
+            history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}],
+            _fmt_datasets([]), _fmt_papers([]), "", session_state,
+        )
         return
     except httpx.HTTPStatusError as e:
         try:
@@ -153,31 +145,25 @@ def ask(query: str, history: list, last_ids: dict):
         except Exception:
             detail = str(e)
         msg = f"Error: {detail}"
-        yield history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}], _fmt_datasets([]), _fmt_papers([]), "", last_ids
+        yield (
+            history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}],
+            _fmt_datasets([]), _fmt_papers([]), "", session_state,
+        )
         return
     except Exception as e:
         msg = f"Error: {e}"
-        yield history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}], _fmt_datasets([]), _fmt_papers([]), "", last_ids
+        yield (
+            history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}],
+            _fmt_datasets([]), _fmt_papers([]), "", session_state,
+        )
         return
 
     answer = data.get("answer", "")
-    mode = data.get("answer_mode", "")
-
     notes = data.get("uncertainty_notes", [])
     notes_md = "\n".join(f"⚠️ {n}" for n in notes) if notes else ""
 
-    # Capture this turn's recommendations for exclusion on any future
-    # expansion follow-up. For papers, prefer openalex_id; fall back to local_id.
-    new_paper_ids = [
-        (p.get("openalex_id") or p.get("local_id"))
-        for p in data.get("recommended_papers", [])
-    ]
-    new_paper_ids = [i for i in new_paper_ids if i]
-    new_dataset_ids = [
-        d.get("dataset_id") for d in data.get("recommended_datasets", [])
-    ]
-    new_dataset_ids = [i for i in new_dataset_ids if i]
-    updated_last_ids = {"papers": new_paper_ids, "datasets": new_dataset_ids}
+    # Receive updated session state from backend
+    updated_session = data.get("session_state") or session_state or {}
 
     final_history = history + [
         {"role": "user", "content": query},
@@ -188,16 +174,15 @@ def ask(query: str, history: list, last_ids: dict):
         _fmt_datasets(data.get("recommended_datasets", [])),
         _fmt_papers(data.get("recommended_papers", [])),
         notes_md,
-        updated_last_ids,
+        updated_session,
     )
 
 
 with gr.Blocks(title="Earth Science Research Assistant") as demo:
     gr.Markdown("# 🌍 Earth Science Research Assistant\nDataset and paper recommendations grounded in Earth science literature.")
 
-    # Tracks the immediately previous turn's recommended IDs so we can send
-    # them back to the backend for optional exclusion on expansion follow-ups.
-    last_ids_state = gr.State({"papers": [], "datasets": []})
+    # Full session state — replaces the old last_ids_state
+    session_state_var = gr.State({})
 
     with gr.Row():
         health_box = gr.Textbox(value=check_health(), label="Status", interactive=False, max_lines=1, scale=1)
@@ -233,13 +218,13 @@ with gr.Blocks(title="Earth Science Research Assistant") as demo:
 
     submit_btn.click(
         fn=ask,
-        inputs=[query_box, chatbot, last_ids_state],
-        outputs=[chatbot, datasets_box, papers_box, notes_box, last_ids_state],
+        inputs=[query_box, chatbot, session_state_var],
+        outputs=[chatbot, datasets_box, papers_box, notes_box, session_state_var],
     )
     query_box.submit(
         fn=ask,
-        inputs=[query_box, chatbot, last_ids_state],
-        outputs=[chatbot, datasets_box, papers_box, notes_box, last_ids_state],
+        inputs=[query_box, chatbot, session_state_var],
+        outputs=[chatbot, datasets_box, papers_box, notes_box, session_state_var],
     )
 
 if __name__ == "__main__":

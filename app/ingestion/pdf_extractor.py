@@ -1,6 +1,6 @@
 import re
 from pathlib import Path
-from .schemas import PageText, ParsedPaper
+from ..core.schemas import PageText, ParsedPaper
 
 
 def _clean_text(text: str) -> str:

@@ -1,8 +1,8 @@
 import json
 import time
 import requests
-from .config import get_settings, ROOT
-from .schemas import OpenAlexPaper
+from ..core.config import get_settings, ROOT
+from ..core.schemas import OpenAlexPaper
 
 BASE = "https://api.openalex.org"
 

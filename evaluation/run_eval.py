@@ -28,11 +28,15 @@ ROOT = HERE.parent
 sys.path.insert(0, str(ROOT))
 
 from openai import OpenAI
-from app.config import get_settings, openai_api_key
-from app.main import _run_pipeline
+from app.core.config import get_settings, openai_api_key
+from app.router import _run_pipeline
 from evaluation.metrics import (
-    recall_at_k, mrr, parse_citation_tags, compute_grounding_rate,
-    collect_emitted_tags, is_abstention_correct, methodology_cites_chunks_rate,
+    recall_at_k, recall_from_pool, mrr,
+    precision_at_k, f1_at_k,
+    parse_citation_tags, compute_grounding_rate,
+    collect_emitted_tags, citation_coverage,
+    is_abstention_correct, methodology_cites_chunks_rate,
+    rouge_l_score,
 )
 
 
@@ -89,13 +93,13 @@ def run_v1(query: str) -> dict:
     latency = time.time() - t0
     answer = result["answer"]
 
-    # IDs of top-10 retrieved for recall metrics
     top_paper_ids_local = [p.local_id for p in result["ranked_papers"][:10] if p.local_id]
-    top_paper_ids_openalex = [p.openalex_id for p in result["ranked_papers"][:10]]
+    top_paper_ids_openalex = [p.openalex_id for p in result["ranked_papers"][:10] if p.openalex_id]
     top_dataset_ids = [d.dataset_id for d in result["ranked_datasets"][:10]]
     top_chunk_paper_ids = [c.local_id for c in result["chunk_candidates"][:10] if c.local_id]
 
     return {
+        "intent_type": result.get("intent_type"),
         "answer_mode": answer.answer_mode,
         "direct_answer": answer.direct_answer,
         "recommended_datasets": [d.model_dump() for d in answer.recommended_datasets],
@@ -118,30 +122,56 @@ def score_v1_sample(sample: dict, v1: dict) -> dict:
     gold_papers = sample.get("gold_paper_local_ids", [])
     gold_datasets = sample.get("gold_dataset_ids", [])
 
-    # Retrieval recall — papers (by local_id)
-    retrieved_papers_in_order = v1["top_paper_local_ids"]
-    # include chunk-paper ids as additional retrieval channel (fulltext evidence)
-    retrieved_papers_union = retrieved_papers_in_order + [
-        lid for lid in v1["top_chunk_paper_ids"] if lid not in retrieved_papers_in_order
-    ]
-    paper_recall_5 = recall_at_k(retrieved_papers_union, gold_papers, k=5)
-    paper_recall_10 = recall_at_k(retrieved_papers_union, gold_papers, k=10)
-    paper_mrr = mrr(retrieved_papers_union, gold_papers)
+    # ── Paper retrieval ──────────────────────────────────────────────────────
+    # Recall: union of top-k from the main channel and chunk channel independently.
+    # The two channels rank items by different signals; appending one list after
+    # the other and slicing at k would make chunk IDs invisible when the main
+    # list already fills k. Instead, take the set union of top-k from each.
+    top5_main  = set(v1["top_paper_local_ids"][:5])
+    top10_main = set(v1["top_paper_local_ids"][:10])
+    top5_chunk  = set(v1["top_chunk_paper_ids"][:5])
+    top10_chunk = set(v1["top_chunk_paper_ids"][:10])
+    pool5  = top5_main  | top5_chunk
+    pool10 = top10_main | top10_chunk
 
-    # Retrieval recall — datasets
-    dataset_recall_5 = recall_at_k(v1["top_dataset_ids"], gold_datasets, k=5)
-    dataset_recall_10 = recall_at_k(v1["top_dataset_ids"], gold_datasets, k=10)
-    dataset_mrr = mrr(v1["top_dataset_ids"], gold_datasets)
+    paper_recall_5  = recall_from_pool(pool5,  gold_papers)
+    paper_recall_10 = recall_from_pool(pool10, gold_papers)
 
-    # Grounding: report came from the pipeline; re-compute as well from emitted tags
+    # Precision and MRR operate on the main ranked list only — ordering matters.
+    paper_precision_5 = precision_at_k(v1["top_paper_local_ids"], gold_papers, k=5)
+    paper_f1_5        = f1_at_k(v1["top_paper_local_ids"], gold_papers, k=5)
+    paper_mrr_val     = mrr(v1["top_paper_local_ids"], gold_papers)
+
+    # ── Dataset retrieval ─────────────────────────────────────────────────────
+    dataset_recall_5    = recall_at_k(v1["top_dataset_ids"], gold_datasets, k=5)
+    dataset_recall_10   = recall_at_k(v1["top_dataset_ids"], gold_datasets, k=10)
+    dataset_precision_5 = precision_at_k(v1["top_dataset_ids"], gold_datasets, k=5)
+    dataset_f1_5        = f1_at_k(v1["top_dataset_ids"], gold_datasets, k=5)
+    dataset_mrr_val     = mrr(v1["top_dataset_ids"], gold_datasets)
+
+    # ── Grounding ─────────────────────────────────────────────────────────────
     grounding_rep = v1.get("grounding_report") or {}
-    grounding_rate = grounding_rep.get("grounding_rate")
+    tags_total = grounding_rep.get("tags_total", 0)
+    raw_grounding_rate = grounding_rep.get("grounding_rate")
+    # Pipeline reports grounding_rate=1.0 when no tags are emitted (vacuously
+    # true — the model didn't hallucinate citations it never made). In eval,
+    # convert to None (N/A) so these cases don't inflate category averages.
+    grounding_rate = None if tags_total == 0 else raw_grounding_rate
     grounded_ok = grounding_rep.get("grounded_ok")
 
-    # Methodology fidelity
+    # ── Citation coverage ──────────────────────────────────────────────────────
+    all_emitted = collect_emitted_tags({
+        "direct_answer": v1.get("direct_answer"),
+        "recommended_datasets": v1.get("recommended_datasets"),
+        "recommended_papers": v1.get("recommended_papers"),
+        "methodology_hints": v1.get("methodology_hints"),
+    })
+    cov = citation_coverage(all_emitted)
+
+    # ── Methodology fidelity ───────────────────────────────────────────────────
     meth_rate = methodology_cites_chunks_rate(v1["methodology_hints"])
 
-    # Abstention (only for oos category)
+    # ── Abstention (oos category only) ────────────────────────────────────────
     abst = None
     if sample.get("category") == "oos":
         abst = is_abstention_correct(
@@ -150,23 +180,42 @@ def score_v1_sample(sample: dict, v1: dict) -> dict:
             v1["uncertainty_notes"],
         )
 
+    # ── Answer quality (direct_answer + reference available) ──────────────────
+    rouge_l = None
+    if sample.get("category") == "direct_answer" and sample.get("gold_reference_answer"):
+        rouge_l = rouge_l_score(
+            v1.get("direct_answer") or "",
+            sample["gold_reference_answer"],
+        )
+
     return {
-        "paper_recall@5": paper_recall_5,
-        "paper_recall@10": paper_recall_10,
-        "paper_mrr": paper_mrr,
-        "dataset_recall@5": dataset_recall_5,
-        "dataset_recall@10": dataset_recall_10,
-        "dataset_mrr": dataset_mrr,
-        "grounding_rate": grounding_rate,
-        "grounded_ok": grounded_ok,
+        "paper_recall@5":            paper_recall_5,
+        "paper_recall@10":           paper_recall_10,
+        "paper_precision@5":         paper_precision_5,
+        "paper_f1@5":                paper_f1_5,
+        "paper_mrr":                 paper_mrr_val,
+        "dataset_recall@5":          dataset_recall_5,
+        "dataset_recall@10":         dataset_recall_10,
+        "dataset_precision@5":       dataset_precision_5,
+        "dataset_f1@5":              dataset_f1_5,
+        "dataset_mrr":               dataset_mrr_val,
+        "grounding_rate":            grounding_rate,
+        "grounded_ok":               grounded_ok,
+        "has_any_citation":          cov["has_any_citation"],
+        "unique_sources_cited":      cov["unique_sources_cited"],
         "methodology_cites_chunks_rate": meth_rate,
-        "abstention_correct": abst,
-        "latency_sec": v1["_latency_sec"],
+        "abstention_correct":        abst,
+        "rouge_l":                   rouge_l,
+        "latency_sec":               v1["_latency_sec"],
     }
 
 
 def score_v0_sample(sample: dict, v0: dict) -> dict:
-    """V0 has no retrieval so most retrieval metrics are N/A. Grounding = 0 (no evidence to cite)."""
+    """V0 has no retrieval so retrieval metrics are N/A.
+    Grounding is N/A for V0 (no evidence block exists) — previously this was
+    set to 0.0 when recommendations existed and None otherwise, which created
+    an asymmetry vs V1 (where no-tag cases became 1.0). Both are now None.
+    """
     abst = None
     if sample.get("category") == "oos":
         abst = is_abstention_correct(
@@ -175,26 +224,37 @@ def score_v0_sample(sample: dict, v0: dict) -> dict:
             v0.get("uncertainty_notes") or [],
         )
 
-    # V0 has no evidence block, so any citation it produces is fabricated.
-    # Since the baseline prompt doesn't ask for citations, most will be empty.
-    # Count any recommendation at all — these are fabricated datasets / papers.
     num_fabricated_datasets = len(v0.get("recommended_datasets") or [])
     num_fabricated_papers = len(v0.get("recommended_papers") or [])
 
+    rouge_l = None
+    if sample.get("category") == "direct_answer" and sample.get("gold_reference_answer"):
+        rouge_l = rouge_l_score(
+            v0.get("direct_answer") or "",
+            sample["gold_reference_answer"],
+        )
+
     return {
-        "paper_recall@5": None,
-        "paper_recall@10": None,
-        "paper_mrr": None,
-        "dataset_recall@5": None,
-        "dataset_recall@10": None,
-        "dataset_mrr": None,
-        "grounding_rate": 0.0 if (num_fabricated_datasets or num_fabricated_papers) else None,
-        "grounded_ok": False if (num_fabricated_datasets or num_fabricated_papers) else None,
+        "paper_recall@5":            None,
+        "paper_recall@10":           None,
+        "paper_precision@5":         None,
+        "paper_f1@5":                None,
+        "paper_mrr":                 None,
+        "dataset_recall@5":          None,
+        "dataset_recall@10":         None,
+        "dataset_precision@5":       None,
+        "dataset_f1@5":              None,
+        "dataset_mrr":               None,
+        "grounding_rate":            None,
+        "grounded_ok":               None,
+        "has_any_citation":          None,
+        "unique_sources_cited":      None,
         "methodology_cites_chunks_rate": None,
-        "abstention_correct": abst,
-        "latency_sec": v0.get("_latency_sec"),
-        "num_fabricated_datasets": num_fabricated_datasets,
-        "num_fabricated_papers": num_fabricated_papers,
+        "abstention_correct":        abst,
+        "rouge_l":                   rouge_l,
+        "latency_sec":               v0.get("_latency_sec"),
+        "num_fabricated_datasets":   num_fabricated_datasets,
+        "num_fabricated_papers":     num_fabricated_papers,
     }
 
 
@@ -210,22 +270,28 @@ def aggregate(per_sample: list[dict], variant: str) -> list[dict]:
     out = []
     for cat, rows in groups.items():
         agg = {"variant": variant, "category": cat, "n": len(rows)}
+
         numeric_fields = [
-            "paper_recall@5", "paper_recall@10", "paper_mrr",
-            "dataset_recall@5", "dataset_recall@10", "dataset_mrr",
-            "grounding_rate", "methodology_cites_chunks_rate", "latency_sec",
+            "paper_recall@5", "paper_recall@10", "paper_precision@5", "paper_f1@5", "paper_mrr",
+            "dataset_recall@5", "dataset_recall@10", "dataset_precision@5", "dataset_f1@5", "dataset_mrr",
+            "grounding_rate", "methodology_cites_chunks_rate",
+            "unique_sources_cited", "rouge_l", "latency_sec",
         ]
         for f in numeric_fields:
             vals = [r.get(f) for r in rows if r.get(f) is not None]
             agg[f] = round(sum(vals) / len(vals), 4) if vals else None
 
-        bool_fields = ["grounded_ok", "abstention_correct"]
+        bool_fields = ["grounded_ok", "abstention_correct", "has_any_citation"]
         for f in bool_fields:
             vals = [r.get(f) for r in rows if r.get(f) is not None]
             if vals:
                 agg[f + "_rate"] = round(sum(1 for v in vals if v) / len(vals), 4)
             else:
                 agg[f + "_rate"] = None
+
+        # Latency P95 (useful for tail-latency profiling of recommendation_hard)
+        latencies = sorted(r["latency_sec"] for r in rows if r.get("latency_sec") is not None)
+        agg["latency_p95"] = round(latencies[max(0, int(0.95 * len(latencies)) - 1)], 3) if latencies else None
 
         out.append(agg)
     return out
@@ -295,7 +361,8 @@ def main(limit: int | None = None, skip_v0: bool = False):
             })
             lat = v1["_latency_sec"]
             gr = v1_metrics.get("grounding_rate")
-            print(f"  V1 latency={lat}s, grounding={gr}")
+            cit = v1_metrics.get("unique_sources_cited")
+            print(f"  V1 latency={lat}s, grounding={gr}, sources_cited={cit}")
         except Exception as e:
             print(f"  V1 FAILED: {e}")
             traceback.print_exc()
@@ -322,7 +389,6 @@ def main(limit: int | None = None, skip_v0: bool = False):
 
     if all_agg:
         fieldnames = sorted({k for r in all_agg for k in r.keys()})
-        # put variant, category, n first
         for pri in ["n", "category", "variant"]:
             if pri in fieldnames:
                 fieldnames.remove(pri)
@@ -344,31 +410,61 @@ def main(limit: int | None = None, skip_v0: bool = False):
 
 
 def _write_markdown_summary(v0_agg: list[dict], v1_agg: list[dict], out_path: Path):
+    def fmt(v):
+        if v is None:
+            return "—"
+        if isinstance(v, bool):
+            return str(v)
+        if isinstance(v, float):
+            return f"{v:.3f}"
+        return str(v)
+
     lines = [
         "# Evaluation Results — V0 (no-RAG) vs V1 (full system)",
         "",
         f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
         "",
-        "## Aggregate metrics by category",
+        "## Retrieval metrics",
         "",
-        "| Variant | Category | n | Paper Recall@5 | Dataset Recall@5 | Paper MRR | Dataset MRR | Grounding Rate | Methodology Cites Chunks | Abstention Rate | Latency (s) |",
+        "| Variant | Category | n | Paper R@5 | Paper P@5 | Paper F1@5 | Paper MRR | DS R@5 | DS P@5 | DS F1@5 | DS MRR |",
         "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
-
-    def fmt(v):
-        if v is None:
-            return "—"
-        if isinstance(v, float):
-            return f"{v:.3f}"
-        return str(v)
-
     for row in v0_agg + v1_agg:
         lines.append(
             f"| {row['variant']} | {row['category']} | {row['n']} | "
-            f"{fmt(row.get('paper_recall@5'))} | {fmt(row.get('dataset_recall@5'))} | "
-            f"{fmt(row.get('paper_mrr'))} | {fmt(row.get('dataset_mrr'))} | "
-            f"{fmt(row.get('grounding_rate'))} | {fmt(row.get('methodology_cites_chunks_rate'))} | "
-            f"{fmt(row.get('abstention_correct_rate'))} | {fmt(row.get('latency_sec'))} |"
+            f"{fmt(row.get('paper_recall@5'))} | {fmt(row.get('paper_precision@5'))} | "
+            f"{fmt(row.get('paper_f1@5'))} | {fmt(row.get('paper_mrr'))} | "
+            f"{fmt(row.get('dataset_recall@5'))} | {fmt(row.get('dataset_precision@5'))} | "
+            f"{fmt(row.get('dataset_f1@5'))} | {fmt(row.get('dataset_mrr'))} |"
+        )
+
+    lines += [
+        "",
+        "## Grounding & citation metrics",
+        "",
+        "| Variant | Category | n | Grounding Rate | Cited Anything | Unique Sources | Meth Chunks | ROUGE-L |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for row in v0_agg + v1_agg:
+        lines.append(
+            f"| {row['variant']} | {row['category']} | {row['n']} | "
+            f"{fmt(row.get('grounding_rate'))} | {fmt(row.get('has_any_citation_rate'))} | "
+            f"{fmt(row.get('unique_sources_cited'))} | {fmt(row.get('methodology_cites_chunks_rate'))} | "
+            f"{fmt(row.get('rouge_l'))} |"
+        )
+
+    lines += [
+        "",
+        "## Abstention & latency",
+        "",
+        "| Variant | Category | n | Abstention Rate | Latency mean (s) | Latency P95 (s) |",
+        "|---|---|---|---|---|---|",
+    ]
+    for row in v0_agg + v1_agg:
+        lines.append(
+            f"| {row['variant']} | {row['category']} | {row['n']} | "
+            f"{fmt(row.get('abstention_correct_rate'))} | "
+            f"{fmt(row.get('latency_sec'))} | {fmt(row.get('latency_p95'))} |"
         )
 
     out_path.write_text("\n".join(lines))

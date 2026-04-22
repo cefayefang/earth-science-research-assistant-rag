@@ -22,8 +22,8 @@ import json
 import hashlib
 import datetime
 from pathlib import Path
-from .config import get_settings, ROOT
-from .schemas import (
+from ..core.config import get_settings, ROOT
+from ..core.schemas import (
     ParsedQuery, OpenAlexPaper, NormalizedDataset,
     DatasetCandidate, ChunkCandidate, FinalAnswer,
 )
