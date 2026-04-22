@@ -1,12 +1,49 @@
+"""
+Paper and dataset reranking.
+
+Design (post-refactor):
+
+Paper scoring uses provenance-specific feature sets. The two feature sets are
+mutually exclusive, so there is no double-counting and "local preferred" is a
+natural consequence of the score ceilings, not a hand-tuned tier bonus.
+
+    Local paper (fulltext_supported):
+        score = 0.40 * chunk_relevance
+              + 0.25 * fulltext_bonus       (1.0 — flat)
+              + 0.10 * recency_score
+              + 0.10 * impact_score
+        ceiling ≈ 0.85
+
+    External paper (OpenAlex, metadata-only):
+        score = 0.40 * semantic_similarity
+              + 0.10 * recency_score
+              + 0.10 * impact_score
+        ceiling ≈ 0.60
+
+Selection uses a fixed quota (local: 7, external: 3) with overflow. This lives
+in the selection layer, not the scoring layer.
+
+Dataset scoring is a single weighted sum over features that were extracted in
+dataset_retriever + (optionally) upgraded by linker.build_links:
+    score = 0.35 * metadata_similarity
+          + 0.20 * variable_match
+          + 0.25 * literature_support
+          + 0.10 * spatial_match
+          + 0.10 * temporal_match
+
+Cross-source dataset deduplication (e.g. canonical vs subset) is handled by the
+LLM at answer-generation time via a prompt rule, not in this module.
+"""
 import json
 import math
 import datetime
 from .config import get_settings, ROOT
 from .schemas import (
     OpenAlexPaper, PaperMatch, PaperCandidate,
-    DatasetCandidate, ChunkCandidate,
+    DatasetCandidate, ChunkCandidate, PaperRecord,
 )
 from .embedder import query_embedding, get_embedding_model
+from .paper_registry import load_paper_registry
 import numpy as np
 
 CURRENT_YEAR = datetime.date.today().year
@@ -31,73 +68,181 @@ def rerank_papers(
     chunk_candidates: list[ChunkCandidate],
     local_query: str,
 ) -> list[PaperCandidate]:
+    """Fuse chunk-based local hits with OpenAlex results, score each side with
+    its own formula, select via the local/external quota, and return a flat
+    ranked list."""
     cfg = get_settings()
     w = cfg["reranking"]["paper_weights"]
+    quota = cfg["reranking"].get("paper_tier_quota", {"local": 7, "external": 3})
 
-    fulltext_ids = {m.local_id for m in paper_matches if m.evidence_level == "fulltext_supported" and m.local_id}
-    local_id_map = {m.openalex_id: m.local_id for m in paper_matches}
-
-    # best chunk score per local_id
+    # ── 1) Aggregate chunk evidence per local paper ───────────────────────────
+    # A local paper surfaces only if at least one of its chunks was retrieved.
     chunk_scores: dict[str, float] = {}
-    for chunk in chunk_candidates:
-        lid = chunk.local_id
-        chunk_scores[lid] = max(chunk_scores.get(lid, 0.0), chunk.chunk_score)
+    for c in chunk_candidates:
+        if c.local_id:
+            chunk_scores[c.local_id] = max(chunk_scores.get(c.local_id, 0.0), c.chunk_score)
 
-    query_vec = np.array(query_embedding(local_query))
+    openalex_local_id_map = {m.openalex_id: m.local_id for m in paper_matches}
 
-    # Batch encode all paper texts in one model call
-    paper_texts = [f"{p.title}. {p.abstract or ''}" for p in openalex_papers]
-    if paper_texts:
-        paper_vecs = get_embedding_model().encode(paper_texts, normalize_embeddings=True)
-        sims = (paper_vecs @ query_vec).tolist()
+    registry: list[PaperRecord] = load_paper_registry()
+    registry_by_local: dict[str, PaperRecord] = {r.local_id: r for r in registry}
+
+    # ── 2) Seed candidate pool with chunk-backed local papers ─────────────────
+    # key scheme: "local::{local_id}" for local, "ext::{openalex_id}" for external
+    candidates: dict[str, dict] = {}
+
+    for local_id, chunk_rel in chunk_scores.items():
+        rec = registry_by_local.get(local_id)
+        if not rec:
+            continue
+        # Seed from registry: year / abstract / doi / cited_by_count are
+        # pre-enriched by build_paper_registry. If this query's OpenAlex
+        # search also returns the same paper, the merge step below will
+        # overwrite with fresher values.
+        candidates[f"local::{local_id}"] = {
+            "provenance": "local",
+            "local_id": local_id,
+            "openalex_id": rec.openalex_id,
+            "title": rec.original_title,
+            "abstract": rec.abstract,
+            "year": rec.year,
+            "doi": rec.doi,
+            "authors": [],
+            "cited_by_count": rec.cited_by_count or 0,
+            "semantic_similarity": 0.0,  # unused for local
+            "chunk_relevance": chunk_rel,
+        }
+
+    # ── 3) Merge OpenAlex into local (if matched) or add as external ──────────
+    if openalex_papers:
+        model = get_embedding_model()
+        q_vec = np.array(query_embedding(local_query))
+        oa_texts = [f"{p.title}. {p.abstract or ''}" for p in openalex_papers]
+        oa_vecs = model.encode(oa_texts, normalize_embeddings=True)
+        oa_sims = (oa_vecs @ q_vec).tolist()
     else:
-        sims = []
+        oa_sims = []
 
+    for paper, sim in zip(openalex_papers, oa_sims):
+        matched_local = openalex_local_id_map.get(paper.openalex_id)
+        if matched_local:
+            key = f"local::{matched_local}"
+            if key in candidates:
+                # Enrich the existing local candidate with OpenAlex metadata
+                candidates[key]["openalex_id"] = paper.openalex_id
+                candidates[key]["abstract"] = paper.abstract
+                candidates[key]["year"] = paper.year
+                candidates[key]["doi"] = paper.doi
+                candidates[key]["authors"] = paper.authors
+                candidates[key]["cited_by_count"] = paper.cited_by_count
+                continue
+            # OpenAlex matched a local paper that had no chunk hit. Since we
+            # dropped the paper-level semantic retrieval, this paper has no
+            # local evidence and is treated as external (abstract-only).
+            # (This preserves full-text awareness via evidence_level below.)
+            # Fall through to the external branch.
+
+        # Pure external (no local match, or matched but no chunk hit)
+        candidates[f"ext::{paper.openalex_id}"] = {
+            "provenance": "external",
+            "local_id": matched_local,  # kept for evidence_level tagging
+            "openalex_id": paper.openalex_id,
+            "title": paper.title,
+            "abstract": paper.abstract,
+            "year": paper.year,
+            "doi": paper.doi,
+            "authors": paper.authors,
+            "cited_by_count": paper.cited_by_count,
+            "semantic_similarity": sim,
+            "chunk_relevance": 0.0,  # unused for external
+        }
+
+    # ── 4) Score each candidate using the provenance-specific formula ─────────
     ranked: list[PaperCandidate] = []
+    for cand in candidates.values():
+        is_local = cand["provenance"] == "local"
+        has_fulltext = is_local or bool(cand["local_id"])
+        fulltext_bonus = 1.0 if is_local else 0.0
 
-    for paper, sim in zip(openalex_papers, sims):
-        local_id = local_id_map.get(paper.openalex_id)
-        has_fulltext = local_id in fulltext_ids if local_id else False
-        chunk_rel = chunk_scores.get(local_id, 0.0) if local_id else 0.0
-        fulltext_bonus = 0.1 if has_fulltext else 0.0
-
-        paper_score = (
-            w["semantic_similarity"] * sim
-            + w["chunk_relevance"] * chunk_rel
-            + w["recency_score"] * _recency_score(paper.year)
-            + w["impact_score"] * _impact_score(paper.cited_by_count)
-            + w["fulltext_bonus"] * fulltext_bonus
-        )
+        if is_local:
+            paper_score = (
+                w["chunk_relevance"] * cand["chunk_relevance"]
+                + w["fulltext_bonus"] * fulltext_bonus
+                + w["recency_score"] * _recency_score(cand["year"])
+                + w["impact_score"] * _impact_score(cand["cited_by_count"])
+            )
+        else:
+            paper_score = (
+                w["semantic_similarity"] * cand["semantic_similarity"]
+                + w["recency_score"] * _recency_score(cand["year"])
+                + w["impact_score"] * _impact_score(cand["cited_by_count"])
+            )
 
         ranked.append(PaperCandidate(
-            openalex_id=paper.openalex_id,
-            local_id=local_id,
-            title=paper.title,
-            abstract=paper.abstract,
-            year=paper.year,
-            doi=paper.doi,
-            authors=paper.authors,
-            cited_by_count=paper.cited_by_count,
+            openalex_id=cand["openalex_id"] or f"local_only_{cand['local_id']}",
+            local_id=cand["local_id"],
+            title=cand["title"] or "",
+            abstract=cand["abstract"],
+            year=cand["year"],
+            doi=cand["doi"],
+            authors=cand["authors"],
+            cited_by_count=cand["cited_by_count"],
             evidence_level="fulltext_supported" if has_fulltext else "metadata_only",
-            semantic_similarity=round(sim, 4),
-            chunk_relevance=round(chunk_rel, 4),
-            recency_score=round(_recency_score(paper.year), 4),
-            impact_score=round(_impact_score(paper.cited_by_count), 4),
+            semantic_similarity=round(cand["semantic_similarity"], 4),
+            chunk_relevance=round(cand["chunk_relevance"], 4),
+            recency_score=round(_recency_score(cand["year"]), 4),
+            impact_score=round(_impact_score(cand["cited_by_count"]), 4),
             fulltext_bonus=fulltext_bonus,
             paper_score=round(paper_score, 4),
         ))
 
-    ranked.sort(key=lambda p: p.paper_score, reverse=True)
+    # ── 5) Selection: local/external quota with overflow ──────────────────────
+    local_quota = quota.get("local", 7)
+    external_quota = quota.get("external", 3)
+    target_size = local_quota + external_quota
 
+    # Use the candidate dict to recover provenance for each PaperCandidate
+    locals_list: list[PaperCandidate] = []
+    externals_list: list[PaperCandidate] = []
+    for cand, pc in zip(candidates.values(), ranked):
+        if cand["provenance"] == "local":
+            locals_list.append(pc)
+        else:
+            externals_list.append(pc)
+
+    locals_list.sort(key=lambda p: p.paper_score, reverse=True)
+    externals_list.sort(key=lambda p: p.paper_score, reverse=True)
+
+    selected = locals_list[:local_quota] + externals_list[:external_quota]
+    leftovers = locals_list[local_quota:] + externals_list[external_quota:]
+    leftovers.sort(key=lambda p: p.paper_score, reverse=True)
+    while len(selected) < target_size and leftovers:
+        selected.append(leftovers.pop(0))
+    # Append remaining leftovers at the tail for full observability
+    selected.extend(leftovers)
+
+    # ── Debug ─────────────────────────────────────────────────────────────────
     debug_dir = ROOT / "generated" / "debug"
     debug_dir.mkdir(parents=True, exist_ok=True)
     with open(debug_dir / "last_reranked_papers.json", "w") as f:
-        json.dump([p.model_dump() for p in ranked], f, indent=2)
+        json.dump([p.model_dump() for p in selected], f, indent=2)
+    with open(debug_dir / "last_paper_tiers.json", "w") as f:
+        json.dump({
+            "local_n":    len(locals_list),
+            "external_n": len(externals_list),
+            "quota":      {"local": local_quota, "external": external_quota},
+            "final_top_provenance": [
+                "local" if p in locals_list else "external"
+                for p in selected[:target_size]
+            ],
+        }, f, indent=2)
 
-    return ranked
+    return selected
 
 
 def rerank_datasets(dataset_candidates: list[DatasetCandidate]) -> list[DatasetCandidate]:
+    """Single source of truth for dataset scoring. Applies the weighted-sum
+    formula to the pre-extracted features and sorts descending."""
     cfg = get_settings()
     w = cfg["reranking"]["dataset_weights"]
 

@@ -25,8 +25,8 @@ def get_path(key: str) -> Path:
     return ROOT / val
 
 
-def gemini_api_key() -> str:
-    key = os.getenv("GEMINI_API_KEY")
+def openai_api_key() -> str:
+    key = os.getenv("OPENAI_API_KEY")
     if not key:
-        raise RuntimeError("GEMINI_API_KEY not set in .env")
+        raise RuntimeError("OPENAI_API_KEY not set in .env")
     return key

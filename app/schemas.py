@@ -21,6 +21,9 @@ class ParsedQuery(BaseModel):
     openalex_query: Optional[str] = None
     zenodo_query: Optional[str] = None
     must_have_constraints: MustHaveConstraints = Field(default_factory=MustHaveConstraints)
+    # Phase 4: structured spatial/temporal matching
+    region_bbox: Optional[list[float]] = None        # [min_lon, min_lat, max_lon, max_lat]
+    parsed_timescale: Optional[list[str]] = None     # [ISO_start, ISO_end]
 
 
 # ── Paper registry ────────────────────────────────────────────────────────────
@@ -31,6 +34,13 @@ class PaperRecord(BaseModel):
     original_title: str
     filename: str
     pdf_path: str
+    # OpenAlex-enriched fields populated at preprocessing time. These ensure
+    # local papers have year/abstract/doi/cited_by_count even when the current
+    # query's OpenAlex search does not happen to return them.
+    year: Optional[int] = None
+    abstract: Optional[str] = None
+    doi: Optional[str] = None
+    cited_by_count: int = 0
 
 
 # ── Dataset ───────────────────────────────────────────────────────────────────
@@ -61,7 +71,11 @@ class DatasetCandidate(BaseModel):
     variable_match: float = 0.0
     spatial_match: float = 0.5
     temporal_match: float = 0.5
-    literature_support: float = 0.2
+    # Default matches the `semantic_only` baseline in settings.yaml. The
+    # retrieve_datasets pipeline overwrites this with has_doi (0.7) for
+    # DOI-bearing candidates, and linker.build_links may upgrade further
+    # to abstract_mention (0.85) or chunk_explicit_mention (1.0).
+    literature_support: float = 0.5
     dataset_score: float = 0.0
 
 
@@ -158,6 +172,7 @@ class RecommendedDataset(BaseModel):
     reason: str
     evidence_strength: str  # high | medium | low
     doi: Optional[str] = None
+    citations: list[str] = Field(default_factory=list)   # e.g. ["C-3", "C-7"]
 
 
 class RecommendedPaper(BaseModel):
@@ -167,6 +182,20 @@ class RecommendedPaper(BaseModel):
     year: Optional[int] = None
     reason: str
     evidence_level: str  # fulltext_supported | metadata_only
+    citations: list[str] = Field(default_factory=list)
+
+
+class MethodHint(BaseModel):
+    hint: str
+    citations: list[str] = Field(default_factory=list)   # chunk tags like "C-3"
+
+
+class GroundingReport(BaseModel):
+    grounded_ok: bool
+    grounding_rate: float
+    violations: list[str] = Field(default_factory=list)
+    tags_found: int = 0
+    tags_total: int = 0
 
 
 class FinalAnswer(BaseModel):
@@ -174,9 +203,10 @@ class FinalAnswer(BaseModel):
     direct_answer: Optional[str] = None
     recommended_datasets: list[RecommendedDataset] = Field(default_factory=list)
     recommended_papers: list[RecommendedPaper] = Field(default_factory=list)
-    methodology_hints: list[str] = Field(default_factory=list)
+    methodology_hints: list[MethodHint] = Field(default_factory=list)
     uncertainty_notes: list[str] = Field(default_factory=list)
     final_text: str
+    grounding_report: Optional[GroundingReport] = None
 
 
 # ── API request/response ──────────────────────────────────────────────────────
@@ -191,5 +221,6 @@ class QueryResponse(BaseModel):
     answer_mode: str
     recommended_datasets: list[RecommendedDataset] = Field(default_factory=list)
     recommended_papers: list[RecommendedPaper] = Field(default_factory=list)
-    methodology_hints: list[str] = Field(default_factory=list)
+    methodology_hints: list[MethodHint] = Field(default_factory=list)
     uncertainty_notes: list[str] = Field(default_factory=list)
+    grounding_report: Optional[GroundingReport] = None

@@ -17,14 +17,15 @@ paths:
   parsed_papers_dir: generated/parsed_papers
   debug_dir: generated/debug
   chroma_dir: generated/chroma
+  evidence_cache_dir: generated/evidence_cache
   normalized_datasets_path: generated/normalized_datasets.jsonl
   paper_registry_path: generated/paper_registry.jsonl
   chunks_path: generated/chunks.jsonl
   dataset_aliases_path: local_database/dataset_metadata/dataset_aliases.json
 
 llm:
-  provider: google_ai_studio
-  default_model: gemini-2.5-flash
+  provider: openai
+  default_model: gpt-4o-mini
   temperature: 0.1
   max_output_tokens: 1024
 
@@ -62,25 +63,45 @@ zenodo:
 retrieval:
   dataset_top_k: 15
   chunk_top_k: 20
+  # Phase 9: filter evidence block by relevance — drives OOS abstention
+  min_dataset_similarity: 0.30
+  min_paper_similarity: 0.25
+  min_chunk_score: 0.30
 
 reranking:
+  # Paper scoring uses provenance-specific feature sets:
+  #   local paper:    chunk_relevance + fulltext_bonus + recency + impact
+  #   external paper: semantic_similarity + recency + impact
+  # The two feature sets are mutually exclusive, so there's no double-counting.
+  # Local max score = 0.85, external max score = 0.60 — local is naturally preferred
+  # without any extra tier_bonus.
   paper_weights:
-    semantic_similarity: 0.35
-    chunk_relevance: 0.25
-    recency_score: 0.15
-    impact_score: 0.15
-    fulltext_bonus: 0.10
+    chunk_relevance:      0.40   # local-only signal
+    semantic_similarity:  0.40   # external-only signal
+    fulltext_bonus:       0.25   # 1.0 if local else 0.0 (binary)
+    recency_score:        0.10
+    impact_score:         0.10
+  paper_tier_quota:
+    local:    7   # chunk-backed local papers
+    external: 3   # OpenAlex metadata-only supplement
   dataset_weights:
     semantic_similarity: 0.35
-    variable_match: 0.20
-    literature_support: 0.20
-    spatial_match: 0.15
-    temporal_match: 0.10
+    variable_match:      0.20
+    literature_support:  0.25
+    spatial_match:       0.10
+    temporal_match:      0.10
+  # Hard filter: when parsed_query.must_have_constraints.region/timescale is True,
+  # drop candidates whose respective match score falls below these thresholds.
+  must_have_gating:
+    region_threshold:   0.3
+    temporal_threshold: 0.3
+  # literature_support is layered: baseline (has_doi / semantic_only) gets upgraded
+  # by mention evidence if any is found. Take max.
   literature_support_scores:
-    zenodo_doi_matches_openalex: 1.0
-    chunk_explicit_mention: 0.8
-    abstract_mention: 0.5
-    semantic_only: 0.2
+    chunk_explicit_mention: 1.0   # dataset named in a retrieved local chunk
+    abstract_mention:       0.85  # dataset named in a retrieved OpenAlex abstract
+    has_doi:                0.7   # baseline for DOI-bearing candidates (Zenodo + authoritative archives)
+    semantic_only:          0.5   # neither DOI nor mention; survived by vector match only
   spatial_temporal_default: 0.5
 
 logging:

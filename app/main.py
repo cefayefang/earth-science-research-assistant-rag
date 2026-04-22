@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import PlainTextResponse
-from google.genai import errors as genai_errors
+from openai import OpenAIError, RateLimitError
 from .schemas import QueryRequest, QueryResponse
 from .query_parser import parse_query
 from .openalex_client import fetch_openalex_papers
@@ -10,6 +10,7 @@ from .chunk_retriever import retrieve_chunks
 from .linker import build_links
 from .reranker import rerank_papers, rerank_datasets
 from .answer_generator import generate_answer
+from .evidence_cache_writer import write_evidence_cache
 
 app = FastAPI(title="Earth Science Research Assistant")
 
@@ -20,6 +21,7 @@ def health():
 
 
 def _run_pipeline(user_query: str):
+    """Full pipeline. Returns a dict with everything needed for response + eval."""
     parsed = parse_query(user_query)
 
     openalex_papers = []
@@ -28,19 +30,47 @@ def _run_pipeline(user_query: str):
 
     openalex_dois = {p.doi.lower() for p in openalex_papers if p.doi}
     paper_matches = match_papers(openalex_papers)
-    dataset_candidates = retrieve_datasets(parsed, openalex_dois)
+    dataset_candidates, zenodo_records = retrieve_datasets(parsed, openalex_dois)
     chunk_candidates = retrieve_chunks(parsed)
     build_links(dataset_candidates, chunk_candidates, openalex_papers)
-    ranked_papers = rerank_papers(openalex_papers, paper_matches, chunk_candidates, parsed.local_query)
+    ranked_papers = rerank_papers(
+        openalex_papers, paper_matches, chunk_candidates, parsed.local_query,
+    )
     ranked_datasets = rerank_datasets(dataset_candidates)
-    answer = generate_answer(parsed, ranked_papers[:10], ranked_datasets[:10], chunk_candidates[:10])
-    return parsed, ranked_papers, ranked_datasets, chunk_candidates, answer
+    answer, evidence_block_text = generate_answer(
+        parsed, ranked_papers[:10], ranked_datasets[:10], chunk_candidates[:10]
+    )
+
+    # Phase 3: snapshot the full evidence state to disk
+    cache_dir = write_evidence_cache(
+        query=user_query,
+        parsed=parsed,
+        openalex_papers=openalex_papers,
+        zenodo_records=zenodo_records,
+        local_dataset_candidates=ranked_datasets,
+        chunk_candidates=chunk_candidates,
+        evidence_block_text=evidence_block_text,
+        final_answer=answer,
+    )
+
+    return {
+        "parsed": parsed,
+        "ranked_papers": ranked_papers,
+        "ranked_datasets": ranked_datasets,
+        "chunk_candidates": chunk_candidates,
+        "openalex_papers": openalex_papers,
+        "zenodo_records": zenodo_records,
+        "answer": answer,
+        "evidence_block_text": evidence_block_text,
+        "cache_dir": str(cache_dir),
+    }
 
 
 @app.post("/query", response_model=QueryResponse)
 def query(request: QueryRequest):
     try:
-        _, ranked_papers, ranked_datasets, chunk_candidates, answer = _run_pipeline(request.query)
+        result = _run_pipeline(request.query)
+        answer = result["answer"]
         return QueryResponse(
             query=request.query,
             answer=answer.final_text,
@@ -49,21 +79,22 @@ def query(request: QueryRequest):
             recommended_papers=answer.recommended_papers,
             methodology_hints=answer.methodology_hints,
             uncertainty_notes=answer.uncertainty_notes,
+            grounding_report=answer.grounding_report,
         )
-    except genai_errors.ClientError as e:
-        code = e.code if hasattr(e, "code") else 0
-        if code == 429 or "RESOURCE_EXHAUSTED" in str(e):
-            raise HTTPException(
-                status_code=429,
-                detail="Gemini API daily quota exceeded (free tier: 20 req/day). Please wait and try again later.",
-            )
-        raise HTTPException(status_code=502, detail=f"Gemini API error: {e}")
+    except RateLimitError as e:
+        raise HTTPException(
+            status_code=429,
+            detail=f"OpenAI API rate limit hit: {e}",
+        )
+    except OpenAIError as e:
+        raise HTTPException(status_code=502, detail=f"OpenAI API error: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 def _format_pretty(request: QueryRequest) -> str:
-    _, ranked_papers, ranked_datasets, _, answer = _run_pipeline(request.query)
+    result = _run_pipeline(request.query)
+    answer = result["answer"]
 
     lines = []
     lines.append("=" * 60)
@@ -79,8 +110,9 @@ def _format_pretty(request: QueryRequest) -> str:
         lines.append("RECOMMENDED DATASETS")
         lines.append("─" * 60)
         for i, d in enumerate(answer.recommended_datasets, 1):
-            lines.append(f"{i}. [{d.source.upper()}] {d.dataset_name}")
-            lines.append(f"   Evidence: {d.evidence_strength} | Score: {d.reason.split(';')[0].replace('Relevance score ','')}")
+            cit = f" [{', '.join(d.citations)}]" if d.citations else ""
+            lines.append(f"{i}. [{d.source.upper()}] {d.dataset_name}{cit}")
+            lines.append(f"   Evidence: {d.evidence_strength} | Reason: {d.reason}")
             if d.doi:
                 lines.append(f"   DOI: {d.doi}")
 
@@ -91,7 +123,17 @@ def _format_pretty(request: QueryRequest) -> str:
         lines.append("─" * 60)
         for i, p in enumerate(answer.recommended_papers, 1):
             tag = "✓ fulltext" if p.evidence_level == "fulltext_supported" else "  metadata"
-            lines.append(f"{i}. [{tag}] {p.title} ({p.year})")
+            cit = f" [{', '.join(p.citations)}]" if p.citations else ""
+            lines.append(f"{i}. [{tag}] {p.title} ({p.year}){cit}")
+            lines.append(f"   Reason: {p.reason}")
+
+    if answer.methodology_hints:
+        lines.append("")
+        lines.append("─" * 60)
+        lines.append("METHODOLOGY HINTS")
+        lines.append("─" * 60)
+        for i, h in enumerate(answer.methodology_hints, 1):
+            lines.append(f"{i}. {h.hint} [{', '.join(h.citations)}]")
 
     if answer.uncertainty_notes:
         lines.append("")
@@ -101,7 +143,18 @@ def _format_pretty(request: QueryRequest) -> str:
         for note in answer.uncertainty_notes:
             lines.append(f"• {note}")
 
+    if answer.grounding_report:
+        lines.append("")
+        lines.append("─" * 60)
+        lines.append("GROUNDING REPORT")
+        lines.append("─" * 60)
+        gr = answer.grounding_report
+        lines.append(f"OK: {gr.grounded_ok} | Rate: {gr.grounding_rate} | Tags: {gr.tags_found}/{gr.tags_total}")
+        for v in gr.violations:
+            lines.append(f"  ⚠ {v}")
+
     lines.append("=" * 60)
+    lines.append(f"Cache: {result['cache_dir']}")
     return "\n".join(lines)
 
 
@@ -109,13 +162,12 @@ def _format_pretty(request: QueryRequest) -> str:
 def query_pretty(request: QueryRequest):
     try:
         return _format_pretty(request)
-    except genai_errors.ClientError as e:
-        code = e.code if hasattr(e, "code") else 0
-        if code == 429 or "RESOURCE_EXHAUSTED" in str(e):
-            raise HTTPException(
-                status_code=429,
-                detail="Gemini API daily quota exceeded (free tier: 20 req/day). Please wait and try again later.",
-            )
-        raise HTTPException(status_code=502, detail=f"Gemini API error: {e}")
+    except RateLimitError as e:
+        raise HTTPException(
+            status_code=429,
+            detail=f"OpenAI API rate limit hit: {e}",
+        )
+    except OpenAIError as e:
+        raise HTTPException(status_code=502, detail=f"OpenAI API error: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

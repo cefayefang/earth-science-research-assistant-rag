@@ -58,6 +58,52 @@ def _parse(work: dict, bucket: str) -> OpenAlexPaper:
 _UNPUBLISHED_TYPES = {"preprint", "dataset", "paratext", "other", "reference-entry", "supplementary-materials"}
 
 
+def fetch_work_by_openalex_id(openalex_id: str) -> dict | None:
+    """
+    Fetch a single OpenAlex work by id (e.g. 'w2122582889' or 'W2122582889').
+    Returns a lightweight dict with year, abstract, doi, cited_by_count, or None on failure.
+    Utility for any per-paper metadata enrichment against the OpenAlex API.
+    """
+    if not openalex_id:
+        return None
+    wid = openalex_id.strip().upper()
+    if not wid.startswith("W"):
+        wid = "W" + wid
+    cfg = get_settings()
+    try:
+        r = requests.get(
+            f"{BASE}/works/{wid}",
+            params={"mailto": cfg["openalex"]["email"]},
+            timeout=cfg["openalex"]["timeout_seconds"],
+        )
+        if r.status_code != 200:
+            return None
+        work = r.json()
+    except Exception as e:
+        print(f"  [openalex id lookup warn] {openalex_id}: {e}")
+        return None
+
+    # Reconstruct abstract from inverted index
+    abstract = work.get("abstract_inverted_index")
+    if abstract:
+        words = {}
+        for word, positions in abstract.items():
+            for pos in positions:
+                words[pos] = word
+        abstract = " ".join(words[i] for i in sorted(words))
+    else:
+        abstract = None
+
+    return {
+        "openalex_id": wid.lower(),
+        "title": work.get("title") or "",
+        "year": work.get("publication_year"),
+        "doi": (work.get("doi") or "").replace("https://doi.org/", "") or None,
+        "abstract": abstract,
+        "cited_by_count": work.get("cited_by_count") or 0,
+    }
+
+
 def _is_published(work: dict) -> bool:
     work_type = work.get("type", "")
     if work_type in _UNPUBLISHED_TYPES:
