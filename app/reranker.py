@@ -67,10 +67,18 @@ def rerank_papers(
     paper_matches: list[PaperMatch],
     chunk_candidates: list[ChunkCandidate],
     local_query: str,
+    exclude_paper_ids: list[str] | None = None,
 ) -> list[PaperCandidate]:
     """Fuse chunk-based local hits with OpenAlex results, score each side with
     its own formula, select via the local/external quota, and return a flat
-    ranked list."""
+    ranked list.
+
+    When `exclude_paper_ids` is provided (by the caller — typically only when
+    the conversation-analyzer's `wants_fresh_recommendations` flag is True),
+    papers whose local_id or openalex_id appears in the set are dropped at the
+    selection step so the user sees genuinely new recommendations.
+    """
+    exclude_set = set(exclude_paper_ids or [])
     cfg = get_settings()
     w = cfg["reranking"]["paper_weights"]
     quota = cfg["reranking"].get("paper_tier_quota", {"local": 7, "external": 3})
@@ -205,6 +213,12 @@ def rerank_papers(
     locals_list: list[PaperCandidate] = []
     externals_list: list[PaperCandidate] = []
     for cand, pc in zip(candidates.values(), ranked):
+        # Apply exclude filter (only meaningful if caller passed a non-empty set)
+        if exclude_set and (
+            (pc.local_id and pc.local_id in exclude_set)
+            or (pc.openalex_id and pc.openalex_id in exclude_set)
+        ):
+            continue
         if cand["provenance"] == "local":
             locals_list.append(pc)
         else:
@@ -240,11 +254,24 @@ def rerank_papers(
     return selected
 
 
-def rerank_datasets(dataset_candidates: list[DatasetCandidate]) -> list[DatasetCandidate]:
+def rerank_datasets(
+    dataset_candidates: list[DatasetCandidate],
+    exclude_dataset_ids: list[str] | None = None,
+) -> list[DatasetCandidate]:
     """Single source of truth for dataset scoring. Applies the weighted-sum
-    formula to the pre-extracted features and sorts descending."""
+    formula to the pre-extracted features and sorts descending.
+
+    When `exclude_dataset_ids` is non-empty, the corresponding candidates are
+    dropped before sorting — used for expansion follow-ups ("more datasets").
+    """
     cfg = get_settings()
     w = cfg["reranking"]["dataset_weights"]
+
+    exclude_set = set(exclude_dataset_ids or [])
+    if exclude_set:
+        dataset_candidates = [
+            d for d in dataset_candidates if d.dataset_id not in exclude_set
+        ]
 
     for cand in dataset_candidates:
         cand.dataset_score = round(

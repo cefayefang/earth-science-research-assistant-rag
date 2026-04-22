@@ -34,120 +34,52 @@ from .schemas import (
 from .dataset_normalizer import load_normalized_datasets
 
 
-_PROMPT = """You are an Earth science research assistant operating in retrieval-grounded mode.
+PROMPTS_DIR = ROOT / "prompts"
 
-=== EVIDENCE BLOCK ===
---- DATASETS (cite as [DS-N]) ---
-{datasets}
+# Map ParsedQuery.intent → filename of the intent-specific prompt section.
+_INTENT_TO_PROMPT_FILE = {
+    "definition_or_explanation":  "intent_definition.md",
+    "paper_specific_question":    "intent_paper_specific.md",
+    "dataset_recommendation":     "intent_dataset_primary.md",
+    "paper_recommendation":       "intent_paper_primary.md",
+    "methodology_support":        "intent_methodology.md",
+    "research_starter":           "intent_research_starter.md",
+    "other":                      "intent_fallback.md",
+}
 
---- PAPERS (cite as [P-N]) ---
-{papers}
 
---- EVIDENCE CHUNKS (cite as [C-N]) ---
-{chunks}
-=== END EVIDENCE BLOCK ===
+def _load_prompt_file(name: str) -> str:
+    """Read a prompt file from prompts/. Fallback to empty string if missing."""
+    path = PROMPTS_DIR / name
+    if not path.exists():
+        return ""
+    return path.read_text().strip()
 
-User query: {query}
-Answer mode: {answer_mode}
 
-HARD rules (absolute — never violate):
-  H1. Every [DS-N], [P-N], [C-N] tag in your output MUST correspond to an entry in the EVIDENCE BLOCK above.
-  H2. recommended_datasets: ONLY items from the DATASETS section above.
-  H3. recommended_papers:   ONLY items from the PAPERS section above.
-  H4. methodology_hints: each hint MUST cite at least one [C-N] chunk from above.
-      If no chunk above supports a methodology claim, return [] (empty list).
-      Do NOT use general methodology knowledge.
-  H5. Dataset capabilities / variables / coverage: only what the description above states.
-  H6. Paper findings: only what the abstract or a cited chunk above states.
+def _assemble_prompt(
+    intent: str,
+    datasets_text: str,
+    papers_text: str,
+    chunks_text: str,
+    query: str,
+    answer_mode: str,
+) -> str:
+    """Compose final LLM prompt = base_rules + intent-specific + evidence + query."""
+    base = _load_prompt_file("base_rules.md")
+    intent_file = _INTENT_TO_PROMPT_FILE.get(intent, "intent_fallback.md")
+    intent_specific = _load_prompt_file(intent_file)
 
-SOFT rules (definitional fallback only):
-  S1. For basic definitional content in direct_answer or hybrid mode
-      (e.g. "What is NDVI?"), prefer quoting from evidence chunks via [C-N].
-      If no chunk defines the term, you MAY use standard textbook knowledge,
-      but MUST add to uncertainty_notes:
-      "Definition provided from general knowledge; no corpus chunk directly defines this term."
-  S2. S1 does NOT extend to methodology, dataset claims, or paper findings.
-
-Abstention (CRITICAL — read carefully):
-  A1. For recommendation mode, per-section abstention:
-       - If the DATASETS section above is empty (shows "(none)") or contains
-         only entries whose topical relevance to the query is clearly weak,
-         return recommended_datasets = [].
-       - Same rule for PAPERS → recommended_papers = [].
-       - Same for CHUNKS → methodology_hints = [].
-  A1b. Add the following note to uncertainty_notes IF AND ONLY IF all three
-       of recommended_datasets, recommended_papers, AND methodology_hints
-       are returned empty (i.e. the entire evidence cache was off-topic):
-         "No corpus evidence matched this query — this may be out of scope
-          for our Earth science literature corpus."
-       If you returned at least one non-empty list, do NOT add this note.
-  A2. For direct_answer mode, if neither chunks nor general knowledge can answer,
-      say so explicitly in direct_answer.
-  A3. IMPORTANT: do NOT invent relevance. If the DATASETS and PAPERS sections
-      describe topics clearly unrelated to the query (e.g., the query is about
-      earthquakes but the block contains only vegetation/drought items),
-      this is a signal that the corpus does not cover this query. Abstain.
-
-Answer-mode behavior:
-
-  • direct_answer: put a concise 2-4 sentence factual answer in `direct_answer`,
-    with [C-N], [P-N], or [DS-N] citations as appropriate to the question.
-    Use [DS-N] when the question is about a specific dataset's properties
-    (e.g., spatial resolution, coverage, variables). Use [C-N] / [P-N] for
-    concept definitions or paper-specific questions.
-
-  • recommendation: put a 3-5 sentence FRAMING PARAGRAPH in `direct_answer`
-    (not a one-liner — readers should get context before the list). The
-    framing should:
-      - briefly describe what the research question entails (what kind of
-        phenomenon, what variables typically matter, what methodological
-        considerations come up);
-      - orient the reader to the KINDS of datasets / papers recommended below
-        (e.g., "The datasets below span atmospheric reanalysis and vegetation
-        indices; the papers provide regional case studies applying these
-        products.");
-      - where natural, weave in specific [DS-N] / [P-N] citations for the
-        most salient ones.
-    Then populate recommended_datasets (up to 5) and recommended_papers (up
-    to 5), each with a one-line `reason` grounded in the evidence block and
-    `citations` pointing to supporting [C-N] chunks.
-
-  • hybrid: same framing paragraph as recommendation mode, but lead with
-    1-2 sentences of definitional/explanatory content (cited) before the
-    orientation sentences. Then the structured lists.
-
-When writing the framing paragraph, avoid mechanical phrasing like "below
-are the recommended datasets". Write as a researcher briefing an early-career
-colleague — natural, informative, and scoped to the question.
-
-Dataset deduplication:
-  • If multiple DATASETS entries refer to the same underlying resource (e.g.,
-    a canonical product like "ERA5" and a regional/temporal subset like
-    "ERA5 monthly mean over Central Asia 2000-2020", or equivalent
-    reformulations of the same dataset with different DOIs/providers),
-    recommend ONLY ONE — prefer the canonical/authoritative version from an
-    official archive (NASA, Copernicus, NOAA, ESA, etc.) over a user-uploaded
-    subset on Zenodo, unless the subset is specifically more appropriate for
-    the query's scope (e.g., query explicitly asks for the subset's region).
-  • Use the dataset titles, DOIs, and sources in the EVIDENCE BLOCK to make
-    this judgment. When in doubt, pick the entry with the broader spatial/
-    temporal coverage.
-
-Return ONLY JSON matching this schema (use "ref" = "DS-1" / "P-1" / "C-1" short tags):
-{{
-  "direct_answer": "string or null",
-  "recommended_datasets": [
-    {{"ref": "DS-N", "reason": "string (must be grounded in above description)", "citations": ["C-N", ...]}}
-  ],
-  "recommended_papers": [
-    {{"ref": "P-N", "reason": "string", "citations": ["C-N", ...]}}
-  ],
-  "methodology_hints": [
-    {{"hint": "string (must be paraphrase of chunk content)", "citations": ["C-N", ...]}}
-  ],
-  "uncertainty_notes": ["..."]
-}}
-"""
+    return (
+        f"{base}\n\n"
+        f"--- INTENT-SPECIFIC OUTPUT SHAPE ---\n{intent_specific}\n\n"
+        f"--- EVIDENCE BLOCK ---\n"
+        f"--- DATASETS (cite as [DS-N]) ---\n{datasets_text}\n\n"
+        f"--- PAPERS (cite as [P-N]) ---\n{papers_text}\n\n"
+        f"--- EVIDENCE CHUNKS (cite as [C-N]) ---\n{chunks_text}\n"
+        f"--- END EVIDENCE BLOCK ---\n\n"
+        f"User query: {query}\n"
+        f"Answer mode: {answer_mode}\n"
+    )
 
 
 # ── Evidence block formatting ────────────────────────────────────────────────
@@ -368,12 +300,13 @@ def generate_answer(
     papers_text,   _ = _format_papers(filtered_papers)
     chunks_text,   _ = _format_chunks(filtered_chunks)
 
-    prompt = _PROMPT.format(
+    prompt = _assemble_prompt(
+        intent=parsed_query.intent,
+        datasets_text=datasets_text,
+        papers_text=papers_text,
+        chunks_text=chunks_text,
         query=parsed_query.original_query,
         answer_mode=parsed_query.answer_mode,
-        datasets=datasets_text,
-        papers=papers_text,
-        chunks=chunks_text,
     )
 
     response = client.chat.completions.create(
@@ -580,6 +513,15 @@ def _strip_internal_tags(text: str) -> str:
     return re.sub(r"  +", " ", cleaned).strip()
 
 
+_SOURCE_LABEL = {
+    "nasa_cmr":       "NASA CMR",
+    "stac":           "STAC",
+    "copernicus_cds": "Copernicus CDS",
+    "cdse":           "CDSE",
+    "zenodo":         "Zenodo",
+}
+
+
 def _render_plain_text(
     answer_json: dict,
     ds_map: dict,
@@ -591,23 +533,49 @@ def _render_plain_text(
 ) -> str:
     """User-facing chatbot text.
 
-    Design: the side panel already renders recommended datasets and papers as
-    structured cards. We do NOT repeat those lists here. Instead the chatbot
-    message presents:
-      1. Framing / direct answer (prose)  — the 3-5 sentence intro the LLM
-         writes in direct_answer for recommendation/hybrid modes
-      2. Methodology hints                — the "how" that cuts across papers
-      3. Uncertainty / caveats            — evidence-quality flags
+    Design: the chatbot keeps a full conversation history, so each turn's
+    message must stand on its own — the user should still be able to see
+    what was recommended in turn N even after turn N+1 overwrites the side
+    panel. We therefore include the recommendations in the chatbot text,
+    but in a clean user-facing format:
+
+      1. Framing / direct answer (prose)
+      2. Recommended datasets (numbered list: name + source, no internal IDs)
+      3. Recommended papers (numbered list: title + year + evidence level)
+      4. Methodology hints — the "how" that cuts across papers
+      5. Uncertainty / caveats (if any)
 
     All internal [DS-N]/[P-N]/[C-N] tags are stripped from user-facing text.
     The structured FinalAnswer JSON (returned over the API) still carries the
-    tags for evaluation and programmatic use.
+    tags for evaluation and programmatic use. The side panel shows the same
+    items as richer cards (with DOI, evidence strength icons, etc.).
     """
     parts = []
 
     direct = _strip_internal_tags((answer_json.get("direct_answer") or "").strip())
     if direct:
         parts.append(direct)
+
+    if rec_datasets:
+        parts.append("\n**Recommended datasets:**")
+        for i, d in enumerate(rec_datasets, 1):
+            source = _SOURCE_LABEL.get(d.source, d.source.upper() if d.source else "")
+            reason = _strip_internal_tags(d.reason) if d.reason else ""
+            line = f"  {i}. **{d.dataset_name}**" + (f" _({source})_" if source else "")
+            if reason:
+                line += f" — {reason}"
+            parts.append(line)
+
+    if rec_papers:
+        parts.append("\n**Recommended papers:**")
+        for i, p in enumerate(rec_papers, 1):
+            year_str = f"({p.year})" if p.year else ""
+            tag = "✓ full-text" if p.evidence_level == "fulltext_supported" else "metadata"
+            reason = _strip_internal_tags(p.reason) if p.reason else ""
+            line = f"  {i}. **{p.title}** {year_str} _[{tag}]_".strip()
+            if reason:
+                line += f" — {reason}"
+            parts.append(line)
 
     if method_hints:
         parts.append("\n**How researchers typically approach this:**")
@@ -619,15 +587,5 @@ def _render_plain_text(
         parts.append("\n**Caveats:**")
         for n in uncertainty_notes:
             parts.append(f"  • {_strip_internal_tags(n)}")
-
-    # Cue the side panel. Only if we actually have something there to show.
-    has_side_panel_content = bool(rec_datasets or rec_papers)
-    if has_side_panel_content:
-        cue_bits = []
-        if rec_datasets:
-            cue_bits.append(f"{len(rec_datasets)} recommended dataset(s)")
-        if rec_papers:
-            cue_bits.append(f"{len(rec_papers)} recommended paper(s)")
-        parts.append(f"\n_See the side panel for {' and '.join(cue_bits)}._")
 
     return "\n".join(parts) if parts else "(no answer)"

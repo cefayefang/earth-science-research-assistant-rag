@@ -20,9 +20,34 @@ def health():
     return {"status": "ok"}
 
 
-def _run_pipeline(user_query: str):
-    """Full pipeline. Returns a dict with everything needed for response + eval."""
-    parsed = parse_query(user_query)
+def _run_pipeline(
+    user_query: str,
+    history: list | None = None,
+    exclude_paper_ids: list[str] | None = None,
+    exclude_dataset_ids: list[str] | None = None,
+):
+    """Full pipeline. Returns a dict with everything needed for response + eval.
+
+    - `history`: prior ConversationMessage dicts (most recent last). Used by the
+      Stage-1 conversation analyzer inside parse_query.
+    - `exclude_*_ids`: IDs from the immediately previous turn's recommendations.
+      These are only ACTUALLY applied as filters when the conversation analyzer
+      decides the current query is an EXPANSION follow-up
+      (parsed.wants_fresh_recommendations == True). For focus shifts or
+      drill-downs the excludes are ignored — the user likely still wants the
+      previous items in context.
+    """
+    parsed, digest = parse_query(user_query, history=history)
+
+    # Only honor the UI-supplied exclude lists when the analyzer confirms the
+    # user wants fresh items. Otherwise a drill-down like "tell me about the
+    # first paper" would wrongly exclude that paper from the candidate pool.
+    effective_exclude_papers = (
+        exclude_paper_ids if (parsed.wants_fresh_recommendations and exclude_paper_ids) else None
+    )
+    effective_exclude_datasets = (
+        exclude_dataset_ids if (parsed.wants_fresh_recommendations and exclude_dataset_ids) else None
+    )
 
     openalex_papers = []
     if parsed.openalex_query:
@@ -35,8 +60,12 @@ def _run_pipeline(user_query: str):
     build_links(dataset_candidates, chunk_candidates, openalex_papers)
     ranked_papers = rerank_papers(
         openalex_papers, paper_matches, chunk_candidates, parsed.local_query,
+        exclude_paper_ids=effective_exclude_papers,
     )
-    ranked_datasets = rerank_datasets(dataset_candidates)
+    ranked_datasets = rerank_datasets(
+        dataset_candidates,
+        exclude_dataset_ids=effective_exclude_datasets,
+    )
     answer, evidence_block_text = generate_answer(
         parsed, ranked_papers[:10], ranked_datasets[:10], chunk_candidates[:10]
     )
@@ -69,7 +98,15 @@ def _run_pipeline(user_query: str):
 @app.post("/query", response_model=QueryResponse)
 def query(request: QueryRequest):
     try:
-        result = _run_pipeline(request.query)
+        history_dicts = (
+            [m.model_dump() for m in request.history] if request.history else None
+        )
+        result = _run_pipeline(
+            request.query,
+            history=history_dicts,
+            exclude_paper_ids=request.exclude_paper_ids,
+            exclude_dataset_ids=request.exclude_dataset_ids,
+        )
         answer = result["answer"]
         return QueryResponse(
             query=request.query,
@@ -93,7 +130,15 @@ def query(request: QueryRequest):
 
 
 def _format_pretty(request: QueryRequest) -> str:
-    result = _run_pipeline(request.query)
+    history_dicts = (
+        [m.model_dump() for m in request.history] if request.history else None
+    )
+    result = _run_pipeline(
+        request.query,
+        history=history_dicts,
+        exclude_paper_ids=request.exclude_paper_ids,
+        exclude_dataset_ids=request.exclude_dataset_ids,
+    )
     answer = result["answer"]
 
     lines = []

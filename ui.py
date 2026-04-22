@@ -11,7 +11,19 @@ h1 { font-size: 1.6rem !important; font-weight: 700 !important; }
 h2 { font-size: 1.1rem !important; font-weight: 600 !important; margin-top: 0.8em !important; }
 .label-wrap { font-weight: 600 !important; font-size: 0.85rem !important; color: #555 !important; }
 .chatbot .message { font-size: 0.95rem !important; line-height: 1.6 !important; }
-.side-panel { font-size: 0.88rem !important; line-height: 1.55 !important; }
+/* Side panel: never cap height, always show all listed recommendations. */
+.side-panel {
+    font-size: 0.88rem !important;
+    line-height: 1.55 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    height: auto !important;
+}
+.side-panel > *, .side-panel .prose, .side-panel .markdown-body {
+    max-height: none !important;
+    overflow: visible !important;
+    height: auto !important;
+}
 .gr-button-primary { font-weight: 600 !important; }
 """
 
@@ -24,6 +36,32 @@ BADGE = {
 }
 
 STRENGTH_ICON = {"high": "🟢", "medium": "🟡", "low": "🔴"}
+
+
+def _flatten_content(content) -> str:
+    """Normalize Gradio chatbot message content to a plain string.
+
+    Depending on Gradio version, `content` may be:
+      - a plain string (older versions / simple text)
+      - a list of {text, type} dicts (newer versions, multi-modal format)
+      - None (dangling message)
+
+    We flatten everything into a single string for transport to the backend.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(item.get("text", ""))
+            elif isinstance(item, str):
+                parts.append(item)
+        return " ".join(parts).strip()
+    # fallback for unexpected types
+    return str(content)
 
 
 def check_health() -> str:
@@ -60,24 +98,54 @@ def _fmt_papers(items: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-def ask(query: str, history: list):
+def ask(query: str, history: list, last_ids: dict):
+    """last_ids is a gr.State dict: {"papers": [...], "datasets": [...]} tracking
+    the immediately previous turn's recommended IDs. Sent to the backend every
+    turn; backend only ACTUALLY applies them as filters when the analyzer
+    marks the current query as an expansion follow-up."""
     if not query.strip():
-        yield history, _fmt_datasets([]), _fmt_papers([]), ""
+        yield history, _fmt_datasets([]), _fmt_papers([]), "", last_ids
         return
 
     pending = history + [
         {"role": "user", "content": query},
         {"role": "assistant", "content": "⏳ Thinking…"},
     ]
-    yield pending, _fmt_datasets([]), _fmt_papers([]), ""
+    yield pending, _fmt_datasets([]), _fmt_papers([]), "", last_ids
+
+    # Normalize Gradio's content format (string or structured list of dicts)
+    # before sending to the backend schema (which expects a string).
+    prior = []
+    for m in history:
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        content = _flatten_content(m.get("content"))
+        if not content or content == "⏳ Thinking…":
+            continue
+        prior.append({"role": role, "content": content})
+
+    last_paper_ids = (last_ids or {}).get("papers") or []
+    last_dataset_ids = (last_ids or {}).get("datasets") or []
 
     try:
-        r = httpx.post(f"{API_URL}/query", json={"query": query}, timeout=120)
+        r = httpx.post(
+            f"{API_URL}/query",
+            json={
+                "query": query,
+                "history": prior or None,
+                "exclude_paper_ids": last_paper_ids or None,
+                "exclude_dataset_ids": last_dataset_ids or None,
+            },
+            timeout=120,
+        )
         r.raise_for_status()
         data = r.json()
     except httpx.TimeoutException:
         msg = "Request timed out. Please try again."
-        yield history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}], _fmt_datasets([]), _fmt_papers([]), ""
+        yield history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}], _fmt_datasets([]), _fmt_papers([]), "", last_ids
         return
     except httpx.HTTPStatusError as e:
         try:
@@ -85,11 +153,11 @@ def ask(query: str, history: list):
         except Exception:
             detail = str(e)
         msg = f"Error: {detail}"
-        yield history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}], _fmt_datasets([]), _fmt_papers([]), ""
+        yield history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}], _fmt_datasets([]), _fmt_papers([]), "", last_ids
         return
     except Exception as e:
         msg = f"Error: {e}"
-        yield history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}], _fmt_datasets([]), _fmt_papers([]), ""
+        yield history + [{"role": "user", "content": query}, {"role": "assistant", "content": msg}], _fmt_datasets([]), _fmt_papers([]), "", last_ids
         return
 
     answer = data.get("answer", "")
@@ -97,6 +165,19 @@ def ask(query: str, history: list):
 
     notes = data.get("uncertainty_notes", [])
     notes_md = "\n".join(f"⚠️ {n}" for n in notes) if notes else ""
+
+    # Capture this turn's recommendations for exclusion on any future
+    # expansion follow-up. For papers, prefer openalex_id; fall back to local_id.
+    new_paper_ids = [
+        (p.get("openalex_id") or p.get("local_id"))
+        for p in data.get("recommended_papers", [])
+    ]
+    new_paper_ids = [i for i in new_paper_ids if i]
+    new_dataset_ids = [
+        d.get("dataset_id") for d in data.get("recommended_datasets", [])
+    ]
+    new_dataset_ids = [i for i in new_dataset_ids if i]
+    updated_last_ids = {"papers": new_paper_ids, "datasets": new_dataset_ids}
 
     final_history = history + [
         {"role": "user", "content": query},
@@ -107,18 +188,23 @@ def ask(query: str, history: list):
         _fmt_datasets(data.get("recommended_datasets", [])),
         _fmt_papers(data.get("recommended_papers", [])),
         notes_md,
+        updated_last_ids,
     )
 
 
 with gr.Blocks(title="Earth Science Research Assistant") as demo:
     gr.Markdown("# 🌍 Earth Science Research Assistant\nDataset and paper recommendations grounded in Earth science literature.")
 
+    # Tracks the immediately previous turn's recommended IDs so we can send
+    # them back to the backend for optional exclusion on expansion follow-ups.
+    last_ids_state = gr.State({"papers": [], "datasets": []})
+
     with gr.Row():
         health_box = gr.Textbox(value=check_health(), label="Status", interactive=False, max_lines=1, scale=1)
 
-    with gr.Row():
+    with gr.Row(equal_height=False):
         with gr.Column(scale=3):
-            chatbot = gr.Chatbot(label="Conversation", height=440)
+            chatbot = gr.Chatbot(label="Conversation", height=600)
             with gr.Row():
                 query_box = gr.Textbox(
                     placeholder="e.g. What datasets can I use to study drought in Central Asia?",
@@ -140,13 +226,21 @@ with gr.Blocks(title="Earth Science Research Assistant") as demo:
             )
 
         with gr.Column(scale=2, elem_classes=["side-panel"]):
-            datasets_box = gr.Markdown(label="📊 Datasets (top 5)", value="_Ask a question to see recommendations._")
+            datasets_box = gr.Markdown(label="📊 Datasets", value="_Ask a question to see recommendations._")
             gr.Markdown("---")
-            papers_box = gr.Markdown(label="📄 Papers (top 5)", value="")
+            papers_box = gr.Markdown(label="📄 Papers", value="")
             notes_box = gr.Markdown(label="⚠️ Notes", value="")
 
-    submit_btn.click(fn=ask, inputs=[query_box, chatbot], outputs=[chatbot, datasets_box, papers_box, notes_box])
-    query_box.submit(fn=ask, inputs=[query_box, chatbot], outputs=[chatbot, datasets_box, papers_box, notes_box])
+    submit_btn.click(
+        fn=ask,
+        inputs=[query_box, chatbot, last_ids_state],
+        outputs=[chatbot, datasets_box, papers_box, notes_box, last_ids_state],
+    )
+    query_box.submit(
+        fn=ask,
+        inputs=[query_box, chatbot, last_ids_state],
+        outputs=[chatbot, datasets_box, papers_box, notes_box, last_ids_state],
+    )
 
 if __name__ == "__main__":
     demo.launch(server_name="0.0.0.0", server_port=7860, share=False, theme=gr.themes.Soft(), css=CSS)

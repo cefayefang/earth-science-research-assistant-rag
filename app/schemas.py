@@ -11,7 +11,9 @@ class MustHaveConstraints(BaseModel):
 
 class ParsedQuery(BaseModel):
     original_query: str
-    intent: str
+    intent: str   # one of: definition_or_explanation | paper_specific_question |
+                  #        dataset_recommendation | paper_recommendation |
+                  #        methodology_support | research_starter | other
     answer_mode: str  # direct_answer | recommendation | hybrid
     phenomenon: Optional[str] = None
     variables: list[str] = Field(default_factory=list)
@@ -24,6 +26,19 @@ class ParsedQuery(BaseModel):
     # Phase 4: structured spatial/temporal matching
     region_bbox: Optional[list[float]] = None        # [min_lon, min_lat, max_lon, max_lat]
     parsed_timescale: Optional[list[str]] = None     # [ISO_start, ISO_end]
+    # True only for EXPANSION follow-ups ("more papers", "different ones"). When
+    # True, the reranker will filter out exclude_paper_ids / exclude_dataset_ids
+    # so new items surface. False for focus shifts / drill-downs / new topics.
+    wants_fresh_recommendations: bool = False
+
+
+class ConversationDigest(BaseModel):
+    """Result of a standalone LLM call that looks at prior turns + the current
+    query and distills a short topical summary plus routing hints."""
+    summary: str                                   # 2–3 sentence context summary
+    wants_fresh_recommendations: bool = False      # True for expansion follow-ups
+    intent_shift_hint: Optional[str] = None        # e.g., "methodology_support" when
+                                                   # the follow-up shifts focus
 
 
 # ── Paper registry ────────────────────────────────────────────────────────────
@@ -211,8 +226,24 @@ class FinalAnswer(BaseModel):
 
 # ── API request/response ──────────────────────────────────────────────────────
 
+class ConversationMessage(BaseModel):
+    role: str       # "user" | "assistant"
+    content: str
+
+
 class QueryRequest(BaseModel):
     query: str
+    # Optional multi-turn conversation history (most recent last).
+    # Used so that follow-up queries like "more papers" or "what about datasets"
+    # can inherit topic/region/timescale from previous turns.
+    history: list[ConversationMessage] | None = None
+    # IDs from the immediately previous turn's recommendations. The UI sends
+    # these so the backend can filter them out — but only when the LLM's
+    # ConversationDigest marks wants_fresh_recommendations=True (i.e. the
+    # current query is an expansion like "more papers", not a focus shift or
+    # drill-down). If unset / empty, no exclusion is attempted.
+    exclude_paper_ids: list[str] | None = None
+    exclude_dataset_ids: list[str] | None = None
 
 
 class QueryResponse(BaseModel):
