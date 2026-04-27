@@ -51,14 +51,14 @@
       "category": "recommendation_easy",
       "answer_mode": "recommendation",
       "query": "Recommend satellite datasets for detecting active wildfires and quantifying global burned area.",
-      "gold_paper_local_ids": ["76", "77", "79", "80", "64"],
+      "gold_paper_local_ids": ["76", "79", "80", "64"],
       "gold_dataset_ids": [
         "nasa_cmr_mod14a2_061",
         "nasa_cmr_vnp14_002",
         "nasa_cmr_mcd64a1_061"
       ],
       "gold_topic_tags": ["wildfire", "fire", "burned_area", "emissions"],
-      "rationale": "Papers #76, #79, #80 (van der Werf fire emissions), #77 (Levy MODIS aerosol+fire), and #64 (Werf aerosols_air_quality 2010) are the wildfire/biomass-burning papers. MOD14A2 (Terra thermal anomalies), VNP14 (VIIRS fire), MCD64A1 (burned area) are the canonical fire products."
+      "rationale": "Papers #76, #79, #80 (van der Werf fire emissions, Akagi 2011 biomass burning emission factors) and #64 (Werf 2010 under aerosols_air_quality folder, same paper as #76) are the wildfire/biomass-burning papers. Removed #77 (Levy 2013) because that paper is the MODIS Collection 6 aerosol product description, not a fire-detection paper. MOD14A2 (Terra thermal anomalies), VNP14 (VIIRS fire), MCD64A1 (burned area) are the canonical fire products."
     },
 
     {
@@ -115,7 +115,7 @@
       "category": "recommendation_easy",
       "answer_mode": "recommendation",
       "query": "Which datasets are available for monitoring global ocean chlorophyll concentration from space?",
-      "gold_paper_local_ids": ["62", "60", "61", "63"],
+      "gold_paper_local_ids": [],
       "gold_dataset_ids": [
         "nasa_cmr_modisa_l3m_chl_2022_0",
         "nasa_cmr_modisa_l2_oc_2022_0",
@@ -123,7 +123,7 @@
         "nasa_cmr_olcis3b_l2_efr_oc_2022_0"
       ],
       "gold_topic_tags": ["ocean_color", "chlorophyll", "phytoplankton", "modis"],
-      "rationale": "Papers #60-63 are the ocean-color/chlorophyll cluster. Aqua MODIS L3 mapped chlorophyll (MODISA_L3M_CHL) and L2 ocean color (MODISA_L2_OC) are the canonical global products; Sentinel-3 OLCI provides the ESA equivalent."
+      "rationale": "The four files in the corpus under ocean_color_chlorophyll_*.pdf are filename-mislabeled: #60 is Rusch 2007 (Sorcerer II microbial ocean sampling), #61 is Cavicchioli 2019 (microorganisms and climate change), #62 is Bopp 2013 (CMIP5 ocean-stressor model projections — touches phytoplankton but is not a satellite-monitoring paper), #63 is Collins 2011 (HadGEM2 model description). None directly addresses satellite-based ocean-color monitoring, so gold_paper_local_ids is intentionally empty (like q10). Tests whether the system surfaces the canonical MODIS Aqua / Sentinel-3 OLCI ocean-color products even when paper-side support is weak. Aqua MODIS L3 mapped chlorophyll (MODISA_L3M_CHL) and L2 ocean color (MODISA_L2_OC) are the canonical global products; Sentinel-3 OLCI provides the ESA equivalent."
     },
 
     {

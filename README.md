@@ -211,7 +211,8 @@ curl -s -X POST http://localhost:8000/query/pretty \
 ## Evaluation
 
 ```bash
-python -m evaluation.run_eval
+  python -m evaluation.run_eval --skip-v0   # run without v0 comparison              
+  python -m evaluation.run_eval             # run with v0 comparison
 ```
 
 Runs V0 (no-RAG baseline) and V1 (full system) on 20 queries across 5 categories (recommendation_easy / recommendation_hard / direct_answer / hybrid / oos). Writes per-sample JSONL, summary CSV, and a markdown comparison table to `evaluation/results/`.
